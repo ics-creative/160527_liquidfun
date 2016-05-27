@@ -15,10 +15,14 @@ var POSITION_ITERATIONS = 1;
 var SIZE_PARTICLE = 4;
 /** ドラッグボールのサイズです。 */
 var SIZE_DRAGBLE = 50;
+
+
 /** 画面のサイズ(横幅)です。 */
 var windowW = window.innerWidth;
 /** 画面のサイズ(高さ)です。 */
 var windowH = window.innerHeight;
+/** DPIです。 */
+var dpi = window.devicePixelRatio || 1.0;
 
 /** [CreateJS] ステージです。 */
 var stage;
@@ -115,7 +119,7 @@ function createPhysicsParticles() {
     var box = new b2PolygonShape();
     box.SetAsBoxXYCenterAngle(
         100 / METER, // 幅
-        200 / METER, // 高さ
+        100 / METER, // 高さ
         new b2Vec2(windowW / 2 / METER, // 発生X座標
             -windowH / 2 / METER), // 発生Y座標
         0);
@@ -138,7 +142,7 @@ function createPhysicsBall() {
     // 実態を作成
     var body = world.CreateBody(bd);
     _b2DragBallFixutre = body.CreateFixtureFromShape(circle, 8); //鉄：7.9、アルミニウム：2.6、ゴム：0.4、木：1.4、コンクリート：2.4、氷：1;
-    _b2DragBallFixutre.friction = 0.0; // 鉄：0.6、アルミニウム：0.6、ゴム：0.9、木：0.5、コンクリート：0.7、氷：0
+    _b2DragBallFixutre.friction = 0.1; // 鉄：0.6、アルミニウム：0.6、ゴム：0.9、木：0.5、コンクリート：0.7、氷：0
     _b2DragBallFixutre.restitution = 0.1; // 鉄：0.2、アルミニウム：0.3、ゴム：0.9、木：0.3、コンクリート：0.1、氷：0.1
 
 }
@@ -146,9 +150,12 @@ function createPhysicsBall() {
 
 function createCreatejsWorld() {
     // CreateJSの世界を作成
-    stage = new createjs.Stage("canvas");
-    stage.canvas.width = windowW; // 画面いっぱいに表示
-    stage.canvas.height = windowH;
+    stage = new createjs.Stage("myCanvas");
+    stage.enableMouseOver(); // マウスオーバーを有効化
+
+    stage.canvas.width = windowW * dpi; // 実Pixel数を画面のPixel数に調整
+    stage.canvas.height = windowH * dpi;
+    stage.scaleX = stage.scaleY = dpi;
 
     // タッチ操作をサポートしているブラウザーならば
     if (createjs.Touch.isSupported() == true) {
@@ -208,8 +215,7 @@ function handleTick() {
     // 詳細 ⇛ https://plus.google.com/102594170131511973965/posts/ZA6QadXfjzX
     stage.autoClear = false;
     var context = stage.canvas.getContext("2d");
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = "rgba(0, 0, 0, 0.05)";
+    context.fillStyle = "rgba(0, 0, 0, 0.1)";
     context.fillRect(0, 0, stage.canvas.width, stage.canvas.height);
 
     // 画面を更新する
@@ -218,7 +224,8 @@ function handleTick() {
 
 /** ドラッグイベントを設定します。 */
 function setupDragEvent() {
-    document.addEventListener('mousedown', function (event) {
+    _cjsDragBall.on('mousedown', function (event) {
+        console.log(event)
         var p = getMouseCoords(event);
         var aabb = new b2AABB();
         aabb.lowerBound.Set(p.x - 0.001, p.y - 0.001);
@@ -237,14 +244,15 @@ function setupDragEvent() {
             body.SetAwake(true);
         }
     });
-    document.addEventListener('mousemove', function (event) {
+    _cjsDragBall.on('pressmove', function (event) {
+        console.log(event)
         var p = getMouseCoords(event);
         if (_b2MouseJoint) {
             // マウスジョイントの対象座標を更新
             _b2MouseJoint.SetTarget(p);
         }
     });
-    document.addEventListener('mouseup', function (event) {
+    _cjsDragBall.on('pressup', function (event) {
         if (_b2MouseJoint) {
             // マウスジョイントを破棄
             world.DestroyJoint(_b2MouseJoint);
@@ -259,7 +267,7 @@ function setupDragEvent() {
  * @return b2Vec2 マウス座標のベクター情報です。
  */
 function getMouseCoords(event) {
-    var p = new b2Vec2((stage.mouseX / METER), (stage.mouseY / METER));
+    var p = new b2Vec2((stage.mouseX / dpi / METER), (stage.mouseY / dpi / METER));
     return p;
 }
 
