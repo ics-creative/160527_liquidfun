@@ -117,7 +117,7 @@ function createPhysicsParticles() {
     // 粒子の発生領域
     var box = new b2PolygonShape();
     box.SetAsBoxXYCenterAngle(
-        200 / METER, // 幅
+        100 / METER, // 幅
         200 / METER, // 高さ
         new b2Vec2(windowW / 2 / METER, // 発生X座標
             -windowH / 2 / METER), // 発生Y座標
@@ -242,8 +242,6 @@ function setupDragEvent() {
         var queryCallback = new QueryCallback(p);
         world.QueryAABB(queryCallback, aabb);
 
-
-        console.log(event, queryCallback.fixture)
         if (queryCallback.fixture) {
             var body = queryCallback.fixture.body;
             var md = new b2MouseJointDef();
