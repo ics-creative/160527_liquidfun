@@ -42,6 +42,18 @@ var _b2MouseJoint;
 /** [LiquidFun] ドラッグボール制御用のインスタンスです。 */
 var _b2GroundBody;
 
+/** 端末ごとにパフォーマンスを調整するための変数です。 */
+var performanceLevel;
+switch(navigator.platform){
+    case "Win32": // Windowsだったら
+    case "MacIntel": // OS Xだったら
+        performanceLevel = "high";
+        break;
+    case "iPhone": // iPhoneだったら
+    default: // その他の端末も
+        performanceLevel = "low";
+}
+
 // ページが読み込み終わったら初期化する
 window.addEventListener("load", init);
 
@@ -116,9 +128,12 @@ function createPhysicsParticles() {
     _b2ParticleSystem = world.CreateParticleSystem(psd);
     // 粒子の発生領域
     var box = new b2PolygonShape();
+
+    var w = (performanceLevel == "high") ? 128 : 64;
+    var h = (performanceLevel == "high") ? 256 : 64;
     box.SetAsBoxXYCenterAngle(
-        100 / METER, // 幅
-        200 / METER, // 高さ
+        w / METER, // 幅
+        h / METER, // 高さ
         new b2Vec2(windowW / 2 / METER, // 発生X座標
             -windowH / 2 / METER), // 発生Y座標
         0);
