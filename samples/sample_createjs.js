@@ -183,6 +183,7 @@ function createCreatejsWorld() {
     var length = _b2ParticleSystem.GetPositionBuffer().length / 2;
     for (var i = 0; i < length; i++) {
         var shape = new createjs.Shape(); // シェイプを作成
+        shape.mouseEnabled = false;
         shape.compositeOperation = Math.random() < 0.5 ? "normal" : "lighter";
         var hue = i / length * 100 + 180; // 色相
         var satuation = 40 * Math.random() + 60;
@@ -241,7 +242,6 @@ function handleTick() {
 /** ドラッグイベントを設定します。 */
 function setupDragEvent() {
     _cjsDragBall.on('mousedown', function (event) {
-        console.log(event)
         var p = getMouseCoords(event);
         var aabb = new b2AABB();
         aabb.lowerBound.Set(p.x - 0.001, p.y - 0.001);
@@ -261,7 +261,6 @@ function setupDragEvent() {
         }
     });
     _cjsDragBall.on('pressmove', function (event) {
-        console.log(event)
         var p = getMouseCoords(event);
         if (_b2MouseJoint) {
             // マウスジョイントの対象座標を更新
