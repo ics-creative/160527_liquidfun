@@ -44,7 +44,7 @@ var _b2GroundBody;
 
 /** 端末ごとにパフォーマンスを調整するための変数です。 */
 var performanceLevel;
-switch(navigator.platform){
+switch (navigator.platform) {
     case "Win32": // Windowsだったら
     case "MacIntel": // OS Xだったら
         performanceLevel = "high";
@@ -129,8 +129,8 @@ function createPhysicsParticles() {
     // 粒子の発生領域
     var box = new b2PolygonShape();
 
-    var w = (performanceLevel == "high") ? 128 : 64;
-    var h = (performanceLevel == "high") ? 256 : 64;
+    var w = (performanceLevel == "high") ? 256 : 64;
+    var h = (performanceLevel == "high") ? 384 : 64;
     box.SetAsBoxXYCenterAngle(
         w / METER, // 幅
         h / METER, // 高さ
@@ -147,7 +147,7 @@ function createPhysicsBall() {
     var bd = new b2BodyDef();
     bd.type = b2_dynamicBody;
     bd.position.Set(windowW / 2 / METER,// 発生X座標
-        -windowH / METER // 発生Y座標
+        -windowH * 1.5 / METER // 発生Y座標
     );
     // 形状を設定
     var circle = new b2CircleShape();
@@ -164,44 +164,35 @@ function createPhysicsBall() {
 
 function createPixiWorld() {
     // Pixiの世界を作成
-
     renderer = new PIXI.WebGLRenderer(windowW, windowH);
     document.body.appendChild(renderer.view);
     stage = new PIXI.Container();
 
-
-    // テクスチャを canvas 要素で作成
+    // canvas 要素でグラフィックを作成 (ドローコール削減のため)
     var canvas = document.createElement("canvas");
     canvas.width = SIZE_PARTICLE * 2;
     canvas.height = SIZE_PARTICLE * 2;
     var ctx = canvas.getContext("2d");
     ctx.arc(SIZE_PARTICLE, SIZE_PARTICLE, SIZE_PARTICLE / 2, 0, 2 * Math.PI, false);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'white';
-    ctx.stroke();
-    var texture = PIXI.Texture.fromCanvas(canvas);
-    for (var i = 0; i < length; i++) {
-        var bunny = new PIXI.Sprite(texture);
-        bunny.pivot.x = BALL_SIZE;
-        bunny.pivot.y = BALL_SIZE;
-        this.stage.addChild(bunny);
-        this.particleList[i] = bunny;
-    }
+    ctx.fillStyle = "white";
+    ctx.fill();
 
+    // canvas 要素をテクスチャーに変換
+    var texture = PIXI.Texture.fromCanvas(canvas);
 
     // パーティクルの作成
     var length = _b2ParticleSystem.GetPositionBuffer().length / 2;
     for (var i = 0; i < length; i++) {
-        var shape = new PIXI.Graphics(); // シェイプを作成
-        shape.beginFill(0xFF0000) // 色指定
-        shape.drawCircle(0, 0, SIZE_PARTICLE); // 大きさを指定
+        var shape = new PIXI.Sprite(texture); // シェイプを作成
+        shape.pivot.x = SIZE_PARTICLE;
+        shape.pivot.y = SIZE_PARTICLE;
         stage.addChild(shape); // 画面に追加
         _pixiParticles[i] = shape; // 配列に格納
     }
 
     // ドラッグボールの作成
     _pixiDragBall = new PIXI.Graphics();
-    _pixiDragBall.beginFill(0xFFFFFF) // 色指定
+    _pixiDragBall.beginFill(0x990000); // 色指定
     _pixiDragBall.drawCircle(0, 0, SIZE_DRAGBLE); // 大きさを指定
     stage.addChild(_pixiDragBall); // 画面に追加
 }
