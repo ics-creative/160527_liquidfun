@@ -130,7 +130,7 @@ function createPhysicsParticles() {
   var box = new b2PolygonShape();
 
   var w = (performanceLevel == "high") ? 256 : 64;
-  var h = (performanceLevel == "high") ? 384 : 64;
+  var h = (performanceLevel == "high") ? 384 : 128;
   box.SetAsBoxXYCenterAngle(
     w / METER, // 幅
     h / METER, // 高さ
