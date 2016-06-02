@@ -129,7 +129,7 @@ function createPhysicsParticles() {
   // 粒子の発生領域
   var box = new b2PolygonShape();
 
-  var w = (performanceLevel == "high") ? 256 : 64;
+  var w = (performanceLevel == "high") ? 256 : 128;
   var h = (performanceLevel == "high") ? 384 : 128;
   box.SetAsBoxXYCenterAngle(
     w / METER, // 幅
