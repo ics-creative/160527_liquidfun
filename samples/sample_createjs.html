@@ -12,11 +12,11 @@
 <meta property="og:type" content="website"/>
 <meta property="og:title" content="Liquid Demo by @clockmaker"/>
 <meta property="og:description" content="Googleの物理演算ライブラリ「Liquid」を使ったCreateJSのデモ"/>
-<meta property="og:url" content="https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs_simple.html"/>
-<meta property="og:site_name" content="ClockMaker"/>
+<meta property="og:url" content="https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs.html"/>
+<meta property="og:site_name" content="ICS MEDIA"/>
 <meta property="og:image" content="https://ics-creative.github.io/160527_liquidfun/images/sample_createjs.png"/>
 <meta name="twitter:card" content="player"/>
-<meta name="twitter:player" content="https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs_simple.html"/>
+<meta name="twitter:player" content="https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs.html"/>
 <meta name="twitter:player:width" content="960"/>
 <meta name="twitter:player:height" content="540"/>
 <meta name="twitter:description" content="Googleの物理演算ライブラリ「Liquid」を使ったCreateJSのデモ"/>
@@ -42,5 +42,22 @@
 <script defer src="js/sample_createjs.js"></script>
 <body>
   <canvas id="myCanvas"></canvas>
+
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=UA-34243464-4"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+
+    function gtag() {
+      dataLayer.push(arguments);
+    }
+
+    if (location.href.indexOf('ics-creative.github.io') > -1) {
+      gtag('js', new Date());
+      gtag('config', 'UA-34243464-4');
+    }
+  </script>
+
 </body>
 </html>
