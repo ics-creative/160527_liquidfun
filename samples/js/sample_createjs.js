@@ -159,7 +159,7 @@ function createPhysicsBall() {
   bd.type = b2_dynamicBody;
   bd.position.Set(
     windowW / 2 / METER, // 発生X座標
-    -windowH / METER // 発生Y座標
+    -windowH * 2 / METER // 発生Y座標
   );
   // 形状を設定
   var circle = new b2CircleShape();
