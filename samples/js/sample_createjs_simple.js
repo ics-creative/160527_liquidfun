@@ -16,7 +16,6 @@ var SIZE_PARTICLE = 20;
 /** ドラッグボールのサイズです。 */
 var SIZE_DRAGBLE = 50;
 
-
 /** 画面のサイズ(横幅)です。 */
 var windowW = window.innerWidth;
 /** 画面のサイズ(高さ)です。 */
@@ -65,7 +64,6 @@ function init() {
   setupDragEvent();
 }
 
-
 /** LiquidFunの世界で「壁」を生成します。 */
 function createPhysicsWalls() {
   var density = 0;
@@ -77,29 +75,38 @@ function createPhysicsWalls() {
   wg.SetAsBoxXYCenterAngle(
     windowW / METER / 2, // 幅
     5 / METER, // 高さ
-    new b2Vec2(windowW / METER / 2, // X座標
-      windowH / METER + 0.05), // Y座標
-    0);
+    new b2Vec2(
+      windowW / METER / 2, // X座標
+      windowH / METER + 0.05
+    ), // Y座標
+    0
+  );
   bobo.CreateFixtureFromShape(wg, density);
 
   // 壁の生成 (左側)
   var wgl = new b2PolygonShape();
   wgl.SetAsBoxXYCenterAngle(
-    5 / METER,　// 幅
+    5 / METER, // 幅
     windowH / METER / 2, // 高さ
-    new b2Vec2(-0.05, // X座標
-      windowH / METER / 2), // Y座標
-    0);
+    new b2Vec2(
+      -0.05, // X座標
+      windowH / METER / 2
+    ), // Y座標
+    0
+  );
   bobo.CreateFixtureFromShape(wgl, density);
 
   // 壁の生成 (右側)
   var wgr = new b2PolygonShape();
   wgr.SetAsBoxXYCenterAngle(
-    5 / METER,　// 幅
+    5 / METER, // 幅
     windowH / METER / 2, // 高さ
-    new b2Vec2(windowW / METER + 0.05, // X座標
-      windowH / METER / 2), // Y座標
-    0);
+    new b2Vec2(
+      windowW / METER + 0.05, // X座標
+      windowH / METER / 2
+    ), // Y座標
+    0
+  );
   bobo.CreateFixtureFromShape(wgr, density);
 }
 
@@ -115,9 +122,12 @@ function createPhysicsParticles() {
   box.SetAsBoxXYCenterAngle(
     256 / METER, // 幅
     256 / METER, // 高さ
-    new b2Vec2(windowW / 2 / METER, // 発生X座標
-      -windowH / 2 / METER), // 発生Y座標
-    0);
+    new b2Vec2(
+      windowW / 2 / METER, // 発生X座標
+      -windowH / 2 / METER
+    ), // 発生Y座標
+    0
+  );
   var particleGroupDef = new b2ParticleGroupDef();
   particleGroupDef.shape = box; // 発生矩形を登録
   _b2ParticleSystem.CreateParticleGroup(particleGroupDef);
@@ -127,7 +137,8 @@ function createPhysicsBall() {
   // 属性を設定
   var bd = new b2BodyDef();
   bd.type = b2_dynamicBody;
-  bd.position.Set(windowW / 2 / METER,// 発生X座標
+  bd.position.Set(
+    windowW / 2 / METER, // 発生X座標
     -windowH / METER // 発生Y座標
   );
   // 形状を設定
@@ -138,7 +149,6 @@ function createPhysicsBall() {
   var body = world.CreateBody(bd);
   _b2DragBallFixutre = body.CreateFixtureFromShape(circle, 8); //鉄：7.9、アルミニウム：2.6、ゴム：0.4、木：1.4、コンクリート：2.4、氷：1;
 }
-
 
 function createCreatejsWorld() {
   // CreateJSの世界を作成
@@ -183,7 +193,7 @@ function handleTick() {
     var shape = _cjsParticles[i]; // 配列から要素を取得
     // LiquidFunの配列から座標を取得
     var xx = particlesPositions[i * 2] * METER;
-    var yy = particlesPositions[(i * 2) + 1] * METER;
+    var yy = particlesPositions[i * 2 + 1] * METER;
     // 座標を表示パーツに適用
     shape.x = xx;
     shape.y = yy;
@@ -199,7 +209,7 @@ function handleTick() {
 
 /** ドラッグイベントを設定します。 */
 function setupDragEvent() {
-  _cjsDragBall.on('mousedown', function (event) {
+  _cjsDragBall.on("mousedown", function(event) {
     var p = getMouseCoords(event);
     var aabb = new b2AABB();
     aabb.lowerBound.Set(p.x - 0.001, p.y - 0.001);
@@ -218,21 +228,20 @@ function setupDragEvent() {
       body.SetAwake(true);
     }
   });
-  _cjsDragBall.on('pressmove', function (event) {
+  _cjsDragBall.on("pressmove", function(event) {
     var p = getMouseCoords(event);
     if (_b2MouseJoint) {
       // マウスジョイントの対象座標を更新
       _b2MouseJoint.SetTarget(p);
     }
   });
-  _cjsDragBall.on('pressup', function (event) {
+  _cjsDragBall.on("pressup", function(event) {
     if (_b2MouseJoint) {
       // マウスジョイントを破棄
       world.DestroyJoint(_b2MouseJoint);
       _b2MouseJoint = null;
     }
   });
-
 }
 
 /**
@@ -240,10 +249,9 @@ function setupDragEvent() {
  * @return b2Vec2 マウス座標のベクター情報です。
  */
 function getMouseCoords(event) {
-  var p = new b2Vec2((stage.mouseX / METER), (stage.mouseY / METER));
+  var p = new b2Vec2(stage.mouseX / METER, stage.mouseY / METER);
   return p;
 }
-
 
 /**
  * LiquidFun の衝突判定に使うクラスです。
@@ -254,7 +262,7 @@ function QueryCallback(point) {
   this.fixture = null;
 }
 /**@return bool 当たり判定があれば true を返します。 */
-QueryCallback.prototype.ReportFixture = function (fixture) {
+QueryCallback.prototype.ReportFixture = function(fixture) {
   var body = fixture.body;
   if (body.GetType() === b2_dynamicBody) {
     var inside = fixture.TestPoint(this.point);
