@@ -1,11 +1,14 @@
 {
-  "name": "160527_liquidfun",
-  "version": "1.0.0",
-  "main": "index.js",
-  "repository": "https://ics-ikeda@github.com/ics-creative/160527_liquidfun.git",
-  "author": "ics-ikeda <ikeda@ics-web.jp>",
   "license": "MIT",
+  "private": true,
+  "scripts" : {
+    "format": "prettier --write 'samples/js/*.js'"
+  },
   "dependencies": {
+    "@types/createjs": "^0.0.29",
     "@types/pixi.js": "^4.7.3"
+  },
+  "devDependencies": {
+    "prettier": "^1.12.1"
   }
 }
