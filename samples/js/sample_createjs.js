@@ -14,7 +14,7 @@ var POSITION_ITERATIONS = 1;
 /** パーティクルのサイズです。 */
 var SIZE_PARTICLE = 4;
 /** ドラッグボールのサイズです。 */
-var SIZE_DRAGBLE = 50;
+var SIZE_DRAGBLE = 25;
 
 /** 画面のサイズ(横幅)です。 */
 var windowW = window.innerWidth;
@@ -136,7 +136,7 @@ function createPhysicsParticles() {
   // 粒子の発生領域
   var box = new b2PolygonShape();
 
-  var w = performanceLevel === "high" ? 128 : 64;
+  var w = performanceLevel === "high" ? 128 : 128;
   var h = performanceLevel === "high" ? 128 : 64;
 
   box.SetAsBoxXYCenterAngle(
