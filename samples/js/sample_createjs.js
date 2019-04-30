@@ -159,7 +159,7 @@ function createPhysicsBall() {
   bd.type = b2_dynamicBody;
   bd.position.Set(
     windowW / 2 / METER, // 発生X座標
-    -windowH * 2 / METER // 発生Y座標
+    (-windowH * 2) / METER // 発生Y座標
   );
   // 形状を設定
   var circle = new b2CircleShape();
@@ -193,7 +193,7 @@ function createCreatejsWorld() {
     var shape = new createjs.Shape(); // シェイプを作成
     shape.mouseEnabled = false;
     shape.compositeOperation = Math.random() < 0.5 ? "normal" : "lighter";
-    var hue = i / length * 100 + 180; // 色相
+    var hue = (i / length) * 100 + 180; // 色相
     var satuation = 40 * Math.random() + 60;
     shape.graphics
       .beginFill(createjs.Graphics.getHSL(hue, satuation, 70, 0.5)) // 色指定

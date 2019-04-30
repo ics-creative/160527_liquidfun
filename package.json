@@ -1,14 +1,14 @@
 {
   "license": "MIT",
   "private": true,
-  "scripts" : {
+  "scripts": {
     "format": "prettier --write 'samples/js/*.js'"
   },
   "dependencies": {
     "@types/createjs": "^0.0.29",
-    "@types/pixi.js": "^4.7.3"
+    "pixi.js": "^5.0.0"
   },
   "devDependencies": {
-    "prettier": "^1.12.1"
+    "prettier": "^1.17.0"
   }
 }
