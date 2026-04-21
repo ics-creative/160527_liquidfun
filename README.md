@@ -1,12 +1,12 @@
 # LiquidFun.js Examples
 
-See below article. (Sorry, only Japanese)
+See below article. 
 
-https://ics.media/
+https://ics.media/entry/12206/
 
 ## How to download Library
 
-JavaScript library is available from below url.
+JavaScript library is available from the below url.
 
 https://github.com/google/liquidfun/tree/master/liquidfun/Box2D/lfjs/testbed
 

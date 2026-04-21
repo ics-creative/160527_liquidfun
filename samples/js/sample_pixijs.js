@@ -1,330 +1,351 @@
-// グローバルに「world」インスタンスを用意しなければならない
-let world = null;
+import {
+  Application,
+  Graphics,
+  Particle,
+  ParticleContainer,
+  Texture,
+} from "pixi.js";
+// liquidfun-wasm public sources:
+// npm: https://www.npmjs.com/package/liquidfun-wasm
+// GitHub: https://github.com/Birch-san/box2d-wasm/tree/liquidfun/box2d-wasm
+// original LiquidFun upstream: https://github.com/google/liquidfun
+import Box2DFactory from "liquidfun-wasm";
 
-/** LiquidFunの単位はメートル。px換算の数値を設定します。 */
+let Box2D;
+let world;
+let particleSystem;
+let groundBody;
+let ballBody;
+let ballFixture;
+let mouseJoint = null;
+let dragTarget = null;
+
 const METER = 100;
-/** 時間のステップを設定します。60FPSを示します。 */
-const TIME_STEP = 1.0 / 60.0;
-/** 速度の計算回数です。回数が多いほど正確になりますが、計算負荷が増えます。 */
+const TIME_STEP = 1 / 60;
 const VELOCITY_ITERATIONS = 1;
-/** 位置の計算回数です。回数が多いほど正確になりますが、計算負荷が増えます。 */
 const POSITION_ITERATIONS = 1;
-/** パーティクルのサイズです。 */
 const SIZE_PARTICLE = 4;
-/** ドラッグボールのサイズです。 */
 const SIZE_DRAGBLE = 50;
 
-/** 画面のサイズ(横幅)です。 */
-const windowW = window.innerWidth;
-/** 画面のサイズ(高さ)です。 */
-const windowH = window.innerHeight;
-/** DPIです。 */
-const dpi = window.devicePixelRatio || 1.0;
+let windowW = innerWidth;
+let windowH = innerHeight;
+const dpi = devicePixelRatio ?? 1;
 
-/** [Pixi.js] ステージです。 */
-let stage;
-let app;
-/** [Pixi.js] ドラッグボールの表示オブジェクトです。 */
-let _pixiDragBall;
-/** [Pixi.js] 粒子の表示オブジェクトの配列です。 */
-const _pixiParticles = [];
-let _isDragging = false;
-
-/** [LiquidFun] パーティクルシステムです。 */
-let _b2ParticleSystem;
-/** [LiquidFun] ドラッグボール用のインスタンスです。 */
-let _b2DragBallFixutre;
-/** [LiquidFun] マクスジョイントです。 */
-let _b2MouseJoint;
-/** [LiquidFun] ドラッグボール制御用のインスタンスです。 */
-let _b2GroundBody;
-
-/** 端末ごとにパフォーマンスを調整するための変数です。 */
 let performanceLevel;
-switch (navigator.platform) {
-  case "Win32": // Windowsだったら
-  case "MacIntel": // OS Xだったら
-    performanceLevel = "high";
-    break;
-  case "iPhone": // iPhoneだったら
-  default:
-    // その他の端末も
-    performanceLevel = "low";
+{
+  const ua = navigator.userAgent ?? "";
+  const narrow = innerWidth < 640;
+  const coarsePhone =
+    /iPhone|Android.*Mobile/i.test(ua) ||
+    (narrow && navigator.maxTouchPoints > 0);
+  performanceLevel = coarsePhone ? "low" : "high";
 }
 
-// ページが読み込み終わったら初期化する
-window.addEventListener("DOMContentLoaded", init);
+let app;
+let stage;
+let pixiDragBall;
+let fluidContainer;
+const pixiParticles = [];
 
-function init() {
-  // 重力の設定
-  const gravity = new b2Vec2(0, 10);
-  // Box2D(LiquidFun)の世界を作成
-  world = new b2World(gravity);
+let activePointerId = null;
+let isDragging = false;
+let particleIterations = 1;
 
-  // グランドの作成
-  _b2GroundBody = world.CreateBody(new b2BodyDef());
+init();
 
-  // Box2Dのコンテンツを作成
-  createPhysicsWalls();
-  createPhysicsParticles();
-  createPhysicsBall();
-
-  // Pixiのコンテンツを作成
-  createPixiWorld();
-
-  // 定期的に呼び出す関数(エンターフレーム)を設定
-  handleTick();
-
-  setupDragEvent();
+function screenToWorld(sx, sy) {
+  return { x: sx / METER, y: sy / METER };
 }
 
-/** LiquidFunの世界で「壁」を生成します。 */
+function clientToPixiGlobal(clientX, clientY) {
+  const rect = app.canvas.getBoundingClientRect();
+  return {
+    x: ((clientX - rect.left) / rect.width) * app.screen.width,
+    y: ((clientY - rect.top) / rect.height) * app.screen.height,
+  };
+}
+
+function getPointerWorld(eventLike) {
+  if (eventLike.global) {
+    return screenToWorld(eventLike.global.x, eventLike.global.y);
+  }
+  const nativeEvent = eventLike.nativeEvent ?? eventLike;
+  const point = clientToPixiGlobal(nativeEvent.clientX ?? 0, nativeEvent.clientY ?? 0);
+  return screenToWorld(point.x, point.y);
+}
+
+function updateWindowSize() {
+  windowW = app.screen.width;
+  windowH = app.screen.height;
+}
+
 function createPhysicsWalls() {
   const density = 0;
+  const wallsBody = world.CreateBody(new Box2D.b2BodyDef());
 
-  const bdDef = new b2BodyDef();
-  const bobo = world.CreateBody(bdDef);
-  // 壁の生成 (地面)
-  const wg = new b2PolygonShape();
-  wg.SetAsBoxXYCenterAngle(
-    windowW / METER / 2, // 幅
-    5 / METER, // 高さ
-    new b2Vec2(
-      windowW / METER / 2, // X座標
-      windowH / METER + 0.05
-    ), // Y座標
+  const groundShape = new Box2D.b2PolygonShape();
+  groundShape.SetAsBox(
+    windowW / METER / 2,
+    5 / METER,
+    new Box2D.b2Vec2(windowW / METER / 2, windowH / METER + 0.05),
     0
   );
-  bobo.CreateFixtureFromShape(wg, density);
+  wallsBody.CreateFixture(groundShape, density);
 
-  // 壁の生成 (左側)
-  const wgl = new b2PolygonShape();
-  wgl.SetAsBoxXYCenterAngle(
-    5 / METER, // 幅
-    windowH / METER / 2, // 高さ
-    new b2Vec2(
-      -0.05, // X座標
-      windowH / METER / 2
-    ), // Y座標
+  const leftWall = new Box2D.b2PolygonShape();
+  leftWall.SetAsBox(
+    5 / METER,
+    windowH / METER / 2,
+    new Box2D.b2Vec2(-0.05, windowH / METER / 2),
     0
   );
-  bobo.CreateFixtureFromShape(wgl, density);
+  wallsBody.CreateFixture(leftWall, density);
 
-  // 壁の生成 (右側)
-  const wgr = new b2PolygonShape();
-  wgr.SetAsBoxXYCenterAngle(
-    5 / METER, // 幅
-    windowH / METER / 2, // 高さ
-    new b2Vec2(
-      windowW / METER + 0.05, // X座標
-      windowH / METER / 2
-    ), // Y座標
+  const rightWall = new Box2D.b2PolygonShape();
+  rightWall.SetAsBox(
+    5 / METER,
+    windowH / METER / 2,
+    new Box2D.b2Vec2(windowW / METER + 0.05, windowH / METER / 2),
     0
   );
-  bobo.CreateFixtureFromShape(wgr, density);
+  wallsBody.CreateFixture(rightWall, density);
 }
 
-/** LiquidFunの世界で「粒子」を生成します。 */
 function createPhysicsParticles() {
-  // 粒子の作成 (プロパティーの設定)
-  const psd = new b2ParticleSystemDef();
-  psd.radius = SIZE_PARTICLE / METER; // 粒子の半径
-  psd.pressureStrength = 4.0; // Increases pressure in response to compression Smaller values allow more compression
-  _b2ParticleSystem = world.CreateParticleSystem(psd);
-  // 粒子の発生領域
-  const box = new b2PolygonShape();
+  const particleSystemDef = new Box2D.b2ParticleSystemDef();
+  particleSystemDef.radius = SIZE_PARTICLE / METER;
+  particleSystemDef.pressureStrength = 4.0;
+  particleSystemDef.strictContactCheck = true;
+  particleSystem = world.CreateParticleSystem(particleSystemDef);
 
+  const box = new Box2D.b2PolygonShape();
   const w = performanceLevel === "high" ? 256 : 256;
   const h = performanceLevel === "high" ? 384 : 128;
-  box.SetAsBoxXYCenterAngle(
-    w / METER, // 幅
-    h / METER, // 高さ
-    new b2Vec2(
-      windowW / 2 / METER, // 発生X座標
-      -windowH / 2 / METER
-    ), // 発生Y座標
+  box.SetAsBox(
+    w / METER,
+    h / METER,
+    new Box2D.b2Vec2(windowW / 2 / METER, -windowH / 2 / METER),
     0
   );
-  const particleGroupDef = new b2ParticleGroupDef();
-  particleGroupDef.shape = box; // 発生矩形を登録
-  _b2ParticleSystem.CreateParticleGroup(particleGroupDef);
+
+  const particleGroupDef = new Box2D.b2ParticleGroupDef();
+  particleGroupDef.shape = box;
+  particleSystem.CreateParticleGroup(particleGroupDef);
 }
 
 function createPhysicsBall() {
-  // 属性を設定
-  const bd = new b2BodyDef();
-  bd.type = b2_dynamicBody;
-  bd.position.Set(
-    windowW / 2 / METER, // 発生X座標
-    (-windowH * 1.5) / METER // 発生Y座標
-  );
-  // 形状を設定
-  const circle = new b2CircleShape();
-  circle.radius = SIZE_DRAGBLE / METER;
+  const bodyDef = new Box2D.b2BodyDef();
+  bodyDef.type = Box2D.b2_dynamicBody;
+  bodyDef.position.Set(windowW / 2 / METER, (-windowH * 1.5) / METER);
 
-  // 実態を作成
-  const body = world.CreateBody(bd);
-  _b2DragBallFixutre = body.CreateFixtureFromShape(circle, 8); //鉄：7.9、アルミニウム：2.6、ゴム：0.4、木：1.4、コンクリート：2.4、氷：1;
-  _b2DragBallFixutre.friction = 0.1; // 鉄：0.6、アルミニウム：0.6、ゴム：0.9、木：0.5、コンクリート：0.7、氷：0
-  _b2DragBallFixutre.restitution = 0.1; // 鉄：0.2、アルミニウム：0.3、ゴム：0.9、木：0.3、コンクリート：0.1、氷：0.1
+  const circle = new Box2D.b2CircleShape();
+  circle.m_radius = SIZE_DRAGBLE / METER;
+
+  ballBody = world.CreateBody(bodyDef);
+  ballFixture = ballBody.CreateFixture(circle, 8);
+  ballFixture.SetFriction(0.1);
+  ballFixture.SetRestitution(0.1);
 }
 
 function createPixiWorld() {
-  // Pixiの世界を作成
-  app = new PIXI.Application({
-    width: windowW,
-    height: windowH,
-    resolution: dpi,
-    autoStart: true,
-    resizeTo: window
-  });
-  document.body.appendChild(app.view);
-  stage = app.stage;
-
-  // canvas 要素でグラフィックを作成 (ドローコール削減のため)
   const canvas = document.createElement("canvas");
   canvas.width = SIZE_PARTICLE * 2 * dpi;
   canvas.height = SIZE_PARTICLE * 2 * dpi;
   const ctx = canvas.getContext("2d");
+  ctx.beginPath();
   ctx.arc(
     SIZE_PARTICLE * dpi,
     SIZE_PARTICLE * dpi,
     (SIZE_PARTICLE * dpi) / 2,
     0,
-    2 * Math.PI,
-    false
+    Math.PI * 2
   );
   ctx.fillStyle = "white";
   ctx.fill();
 
-  // canvas 要素をテクスチャーに変換
-  const texture = PIXI.Texture.from(canvas);
+  const texture = Texture.from(canvas);
+  fluidContainer = new ParticleContainer({
+    dynamicProperties: {
+      position: true,
+    },
+  });
+  stage.addChild(fluidContainer);
 
-  // パーティクルの作成
-  const length = _b2ParticleSystem.GetPositionBuffer().length / 2;
-  for (let i = 0; i < length; i++) {
-    const shape = new PIXI.Sprite(texture); // シェイプを作成
-    shape.scale.set(1 / dpi);
-    shape.pivot.x = SIZE_PARTICLE * dpi;
-    shape.pivot.y = SIZE_PARTICLE * dpi;
-
-    stage.addChild(shape); // 画面に追加
-    _pixiParticles[i] = shape; // 配列に格納
+  const particleCount = particleSystem.GetParticleCount();
+  for (let i = 0; i < particleCount; i++) {
+    const shape = new Particle({
+      texture,
+      x: 0,
+      y: 0,
+      scaleX: 1 / dpi,
+      scaleY: 1 / dpi,
+      anchorX: 0.5,
+      anchorY: 0.5,
+    });
+    fluidContainer.addParticle(shape);
+    pixiParticles[i] = shape;
   }
 
-  // ドラッグボールの作成
-  _pixiDragBall = new PIXI.Graphics();
-  _pixiDragBall.beginFill(0x990000); // 色指定
-  _pixiDragBall.drawCircle(0, 0, SIZE_DRAGBLE); // 大きさを指定
-  stage.addChild(_pixiDragBall); // 画面に追加
+  pixiDragBall = new Graphics();
+  pixiDragBall.circle(0, 0, SIZE_DRAGBLE);
+  pixiDragBall.fill({ color: 0x990000 });
+  pixiDragBall.eventMode = "static";
+  pixiDragBall.cursor = "pointer";
+  stage.addChild(pixiDragBall);
 }
 
-/** 時間経過で指出される関数です。 */
-function handleTick() {
-  // 物理演算エンジンを更新
-  world.Step(TIME_STEP, VELOCITY_ITERATIONS, POSITION_ITERATIONS);
+function createMouseJoint(targetPoint) {
+  if (mouseJoint) return;
 
-  // パーティクルシステムの計算結果を取得
-  const particlesPositions = _b2ParticleSystem.GetPositionBuffer();
+  const jointDef = new Box2D.b2MouseJointDef();
+  jointDef.bodyA = groundBody;
+  jointDef.bodyB = ballBody;
+  jointDef.target = new Box2D.b2Vec2(targetPoint.x, targetPoint.y);
+  jointDef.maxForce = 1000 * ballBody.GetMass();
 
-  // 粒子表現 : 物理演算エンジンとPixiの座標を同期
-  for (let i = 0; i < _pixiParticles.length; i++) {
-    const shape = _pixiParticles[i]; // 配列から要素を取得
-    // LiquidFunの配列から座標を取得
-    const xx = particlesPositions[i * 2] * METER;
-    const yy = particlesPositions[i * 2 + 1] * METER;
-    // 座標を表示パーツに適用
-    shape.x = xx;
-    shape.y = yy;
+  const stiffnessPtr = Box2D._malloc(Float32Array.BYTES_PER_ELEMENT * 2);
+  Box2D.b2LinearStiffness(
+    stiffnessPtr,
+    stiffnessPtr + Float32Array.BYTES_PER_ELEMENT,
+    5,
+    0.7,
+    groundBody,
+    ballBody
+  );
+  const stiffnessOffset = stiffnessPtr >> 2;
+  jointDef.stiffness = Box2D.HEAPF32[stiffnessOffset];
+  jointDef.damping = Box2D.HEAPF32[stiffnessOffset + 1];
+  Box2D._free(stiffnessPtr);
+
+  mouseJoint = Box2D.castObject(world.CreateJoint(jointDef), Box2D.b2MouseJoint);
+  ballBody.SetAwake(true);
+}
+
+function destroyMouseJoint() {
+  if (!mouseJoint) return;
+  world.DestroyJoint(mouseJoint);
+  mouseJoint = null;
+}
+
+function setupDragEvent() {
+  function onPointerMove(event) {
+    if (!isDragging || !mouseJoint || !dragTarget) return;
+    if (
+      activePointerId != null &&
+      event.pointerId !== undefined &&
+      event.pointerId !== activePointerId
+    ) {
+      return;
+    }
+    const p = getPointerWorld(event);
+    dragTarget.Set(p.x, p.y);
+    mouseJoint.SetTarget(dragTarget);
   }
 
-  // ドラッグボール : 物理演算エンジンとPixiの座標を同期
-  _pixiDragBall.x = _b2DragBallFixutre.body.GetPosition().x * METER;
-  _pixiDragBall.y = _b2DragBallFixutre.body.GetPosition().y * METER;
+  function onPointerEnd(event) {
+    if (!isDragging) return;
+    if (
+      activePointerId != null &&
+      event.pointerId !== undefined &&
+      event.pointerId !== activePointerId
+    ) {
+      return;
+    }
+
+    isDragging = false;
+    activePointerId = null;
+    destroyMouseJoint();
+    removeEventListener("pointermove", onPointerMove, true);
+    removeEventListener("pointerup", onPointerEnd, true);
+    removeEventListener("pointercancel", onPointerEnd, true);
+  }
+
+  pixiDragBall.on("pointerdown", (event) => {
+    if (mouseJoint) return;
+
+    try {
+      event.preventDefault();
+    } catch (_) {}
+
+    if (event.pointerId !== undefined) {
+      activePointerId = event.pointerId;
+      try {
+        app.canvas.setPointerCapture(event.pointerId);
+      } catch (_) {}
+    }
+
+    isDragging = true;
+    const p = getPointerWorld(event);
+    if (!dragTarget) {
+      dragTarget = new Box2D.b2Vec2(p.x, p.y);
+    } else {
+      dragTarget.Set(p.x, p.y);
+    }
+    createMouseJoint(p);
+
+    addEventListener("pointermove", onPointerMove, true);
+    addEventListener("pointerup", onPointerEnd, true);
+    addEventListener("pointercancel", onPointerEnd, true);
+  });
+}
+
+function renderParticles() {
+  const particleCount = particleSystem.GetParticleCount();
+  const positionBuffer = particleSystem.GetPositionBuffer();
+  const offset = Box2D.getPointer(positionBuffer) >> 2;
+
+  for (let i = 0; i < particleCount; i++) {
+    const particle = pixiParticles[i];
+    particle.x = Box2D.HEAPF32[offset + i * 2] * METER;
+    particle.y = Box2D.HEAPF32[offset + i * 2 + 1] * METER;
+  }
+}
+
+function handleTick() {
+  world.Step(
+    TIME_STEP,
+    VELOCITY_ITERATIONS,
+    POSITION_ITERATIONS,
+    particleIterations
+  );
+
+  renderParticles();
+
+  const ballPosition = ballBody.GetPosition();
+  pixiDragBall.x = ballPosition.x * METER;
+  pixiDragBall.y = ballPosition.y * METER;
 
   requestAnimationFrame(handleTick);
 }
 
-/** ドラッグイベントを設定します。 */
-function setupDragEvent() {
-  _pixiDragBall.interactive = true;
-  _pixiDragBall.on("mousedown", dragStart);
-  _pixiDragBall.on("mousemove", dragMove);
-  _pixiDragBall.on("mouseup", dragEnd);
-  _pixiDragBall.on("mouseupoutside", dragEnd);
-  _pixiDragBall.on("touchstart", dragStart);
-  _pixiDragBall.on("touchmove", dragMove);
-  _pixiDragBall.on("touchend", dragEnd);
-  _pixiDragBall.on("touchendoutside", dragEnd);
+async function init() {
+  Box2D = await Box2DFactory();
 
-  function dragStart(event) {
-    _isDragging = true;
-    const p = getMouseCoords(event.data.global);
-    const aabb = new b2AABB();
-    aabb.lowerBound.Set(p.x - 0.001, p.y - 0.001);
-    aabb.upperBound.Set(p.x + 0.001, p.y + 0.001);
-    const queryCallback = new QueryCallback(p);
-    world.QueryAABB(queryCallback, aabb);
+  app = new Application();
+  await app.init({
+    width: innerWidth,
+    height: innerHeight,
+    resolution: dpi,
+    autoDensity: true,
+    resizeTo: window,
+    preference: "webgl",
+  });
+  document.body.appendChild(app.canvas);
+  stage = app.stage;
+  stage.eventMode = "static";
 
-    if (queryCallback.fixture) {
-      const body = queryCallback.fixture.body;
-      const md = new b2MouseJointDef();
-      md.bodyA = _b2GroundBody;
-      md.bodyB = body;
-      md.target = p;
-      md.maxForce = 1000 * body.GetMass();
-      // マウスジョイントを作成
-      _b2MouseJoint = world.CreateJoint(md);
-      body.SetAwake(true);
-    }
-  }
+  updateWindowSize();
 
-  function dragMove(event) {
-    if (_isDragging === true) {
-      const p = getMouseCoords(event.data.global);
-      if (_b2MouseJoint) {
-        // マウスジョイントの対象座標を更新
-        _b2MouseJoint.SetTarget(p);
-      }
-    }
-  }
+  const gravity = new Box2D.b2Vec2(0, 10);
+  world = new Box2D.b2World(gravity);
+  groundBody = world.CreateBody(new Box2D.b2BodyDef());
 
-  function dragEnd(event) {
-    _isDragging = false;
-    if (_b2MouseJoint) {
-      // マウスジョイントを破棄
-      world.DestroyJoint(_b2MouseJoint);
-      _b2MouseJoint = null;
-    }
-  }
+  createPhysicsWalls();
+  createPhysicsParticles();
+  createPhysicsBall();
+  createPixiWorld();
+  setupDragEvent();
+
+  particleIterations = world.CalculateReasonableParticleIterations(TIME_STEP);
+  handleTick();
 }
-
-/**
- * マウス座標を取得します。
- * @return b2Vec2 マウス座標のベクター情報です。
- */
-function getMouseCoords(point) {
-  const p = new b2Vec2(point.x / METER, point.y / METER);
-  return p;
-}
-
-/**
- * LiquidFun の衝突判定に使うクラスです。
- * @constructor
- */
-function QueryCallback(point) {
-  this.point = point;
-  this.fixture = null;
-}
-/**@return bool 当たり判定があれば true を返します。 */
-QueryCallback.prototype.ReportFixture = function(fixture) {
-  const body = fixture.body;
-  if (body.GetType() === b2_dynamicBody) {
-    const inside = fixture.TestPoint(this.point);
-    if (inside) {
-      this.fixture = fixture;
-      return true;
-    }
-  }
-  return false;
-};
