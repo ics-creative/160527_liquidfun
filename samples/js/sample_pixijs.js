@@ -18,15 +18,17 @@ const MAX_FRAME_DELTA = 0.25;
 const MAX_PHYSICS_STEPS = 5;
 const VELOCITY_ITERATIONS = 1;
 const POSITION_ITERATIONS = 1;
+const STATS_WINDOW_SIZE = 120;
+const STATS_UPDATE_INTERVAL = 6;
 const SIZE_PARTICLE = 4;
 const SIZE_DRAGBLE = 50;
-// 粒子数は可変にせず、現状の見た目と性能で詰めた量を固定値として持つ。
-const PARTICLE_HALF_WIDTH = 317;
-const PARTICLE_HALF_HEIGHT = 221;
+const PARTICLE_HALF_WIDTH = 520;
+const PARTICLE_HALF_HEIGHT = 360;
 const dpi = devicePixelRatio ?? 1;
+const STATS_JS_URL = "https://mrdoob.github.io/stats.js/build/stats.min.js";
 
 // このデモはモジュール読込完了後すぐ起動したいので、初期化はトップレベルで実行する。
-const Box2D = await Box2DFactory();
+const [Box2D, Stats] = await Promise.all([Box2DFactory(), loadStatsConstructor()]);
 
 const app = new Application();
 await app.init({
@@ -34,6 +36,8 @@ await app.init({
   height: innerHeight,
   resolution: dpi,
   autoDensity: true,
+  autoStart: false,
+  sharedTicker: false,
   resizeTo: globalThis,
   preference: "webgpu",
 });
@@ -41,6 +45,9 @@ document.body.appendChild(app.canvas);
 
 const stage = app.stage;
 stage.eventMode = "static";
+
+const statsText = document.getElementById("statsText");
+const frameStats = createStatsMonitor(Stats);
 
 // LiquidFun 側は Pixi の resizeTo を知らないので、物理世界は自前で管理する。
 const gravity = new Box2D.b2Vec2(0, 10);
@@ -67,6 +74,22 @@ let lastFrameTime = null;
 let accumulatedTime = 0;
 let appliedWorldWidth = initialWorldWidth;
 let appliedWorldHeight = initialWorldHeight;
+const performanceStats = {
+  fps: TARGET_FPS,
+  frameCount: 0,
+  physicsSteps: 0,
+  physics: createMetric(),
+  render: createMetric(),
+};
+const runtimeStats = {
+  particleCount: currentParticleCount,
+  fps: TARGET_FPS,
+  physicsMs: 0,
+  physicsAverageMs: 0,
+  physicsSteps: 0,
+  renderMs: 0,
+  renderAverageMs: 0,
+};
 
 const devtoolsStats = {
   extension: {
@@ -78,11 +101,13 @@ const devtoolsStats = {
     if (container !== stage) {
       return;
     }
-    state.fps = Math.round(Number.isFinite(app.ticker.FPS) ? app.ticker.FPS : TARGET_FPS);
-    state.particleCount = currentParticleCount;
+    state.fps = Math.round(runtimeStats.fps);
+    state.particleCount = runtimeStats.particleCount;
+    state.physicsMs = Number(runtimeStats.physicsAverageMs.toFixed(2));
+    state.renderMs = Number(runtimeStats.renderAverageMs.toFixed(2));
   },
   getKeys() {
-    return ["fps", "particleCount"];
+    return ["fps", "particleCount", "physicsMs", "renderMs"];
   },
 };
 
@@ -90,8 +115,10 @@ globalThis.__PIXI_DEVTOOLS__ = {
   app,
   extensions: [devtoolsStats],
 };
+globalThis.__liquidfunStats = runtimeStats;
 
 setupDragEvent();
+updateStatsPanel();
 requestAnimationFrame(handleTick);
 
 function screenToWorld(sx, sy) {
@@ -127,6 +154,97 @@ function getWorldWidth() {
 
 function getWorldHeight() {
   return app.screen.height;
+}
+
+function loadStatsConstructor() {
+  if (typeof globalThis.Stats === "function") {
+    return Promise.resolve(globalThis.Stats);
+  }
+
+  return new Promise((resolve, reject) => {
+    const onLoad = () => {
+      if (typeof globalThis.Stats === "function") {
+        resolve(globalThis.Stats);
+        return;
+      }
+
+      reject(new Error("stats.js loaded without exposing Stats"));
+    };
+
+    const onError = () => {
+      reject(new Error(`Failed to load stats.js from ${STATS_JS_URL}`));
+    };
+
+    const existingScript = document.querySelector('script[data-stats-js="true"]');
+    if (existingScript) {
+      existingScript.addEventListener("load", onLoad, { once: true });
+      existingScript.addEventListener("error", onError, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = STATS_JS_URL;
+    script.async = true;
+    script.dataset.statsJs = "true";
+    script.addEventListener("load", onLoad, { once: true });
+    script.addEventListener("error", onError, { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+function createStatsMonitor(StatsConstructor) {
+  const stats = new StatsConstructor();
+  stats.showPanel(0);
+  stats.dom.style.top = "12px";
+  stats.dom.style.left = "12px";
+  stats.dom.style.zIndex = "20";
+  document.body.appendChild(stats.dom);
+  return stats;
+}
+
+function createMetric() {
+  return {
+    currentMs: 0,
+    averageMs: 0,
+    samples: new Float32Array(STATS_WINDOW_SIZE),
+    sampleSum: 0,
+    sampleIndex: 0,
+    sampleCount: 0,
+  };
+}
+
+function recordMetric(metric, timeMs) {
+  metric.currentMs = timeMs;
+
+  if (metric.sampleCount === STATS_WINDOW_SIZE) {
+    metric.sampleSum -= metric.samples[metric.sampleIndex];
+  } else {
+    metric.sampleCount += 1;
+  }
+
+  metric.samples[metric.sampleIndex] = timeMs;
+  metric.sampleSum += timeMs;
+  metric.sampleIndex = (metric.sampleIndex + 1) % STATS_WINDOW_SIZE;
+  metric.averageMs = metric.sampleSum / metric.sampleCount;
+}
+
+function updateStatsPanel() {
+  runtimeStats.particleCount = currentParticleCount;
+  runtimeStats.fps = performanceStats.fps;
+  runtimeStats.physicsMs = performanceStats.physics.currentMs;
+  runtimeStats.physicsAverageMs = performanceStats.physics.averageMs;
+  runtimeStats.physicsSteps = performanceStats.physicsSteps;
+  runtimeStats.renderMs = performanceStats.render.currentMs;
+  runtimeStats.renderAverageMs = performanceStats.render.averageMs;
+
+  if (!statsText) {
+    return;
+  }
+
+  statsText.textContent =
+    `${currentParticleCount.toLocaleString()} particles` +
+    ` | physics ${performanceStats.physics.averageMs.toFixed(2)} ms avg` +
+    ` | render ${performanceStats.render.averageMs.toFixed(2)} ms avg`;
 }
 
 function createStaticWall(shape) {
@@ -310,6 +428,23 @@ function destroyMouseJoint() {
 }
 
 function setupDragEvent() {
+  let dragController = null;
+
+  function beginDragListeners() {
+    dragController?.abort();
+    dragController = new AbortController();
+    const options = { capture: true, signal: dragController.signal };
+
+    addEventListener("pointermove", onPointerMove, options);
+    addEventListener("pointerup", onPointerEnd, options);
+    addEventListener("pointercancel", onPointerEnd, options);
+  }
+
+  function endDragListeners() {
+    dragController?.abort();
+    dragController = null;
+  }
+
   function onPointerMove(event) {
     if (!isDragging || !mouseJoint || !dragTarget) return;
     if (
@@ -339,9 +474,7 @@ function setupDragEvent() {
     isDragging = false;
     activePointerId = null;
     destroyMouseJoint();
-    removeEventListener("pointermove", onPointerMove, true);
-    removeEventListener("pointerup", onPointerEnd, true);
-    removeEventListener("pointercancel", onPointerEnd, true);
+    endDragListeners();
   }
 
   pixiDragBall.on("pointerdown", (event) => {
@@ -365,9 +498,7 @@ function setupDragEvent() {
     dragTarget.Set(p.x, p.y);
     createMouseJoint(p);
 
-    addEventListener("pointermove", onPointerMove, true);
-    addEventListener("pointerup", onPointerEnd, true);
-    addEventListener("pointercancel", onPointerEnd, true);
+    beginDragListeners();
   });
 }
 
@@ -428,29 +559,48 @@ function handleTick(frameTime) {
     lastFrameTime = frameTime;
   }
 
+  frameStats.begin();
+
   // 固定 60 Hz で進めて、144 Hz などの高リフレッシュ環境でも倍速にならないようにする。
   const rawElapsed = Math.max((frameTime - lastFrameTime) / 1000, 0);
   const elapsed = Math.min(rawElapsed, MAX_FRAME_DELTA);
+  const frameDurationMs = Math.max(frameTime - lastFrameTime, 0);
   lastFrameTime = frameTime;
   accumulatedTime += elapsed;
   syncViewportToPhysics();
 
   let steps = 0;
+  const physicsStart = performance.now();
   while (accumulatedTime >= TIME_STEP && steps < MAX_PHYSICS_STEPS) {
     stepPhysics();
     accumulatedTime -= TIME_STEP;
     steps++;
   }
+  const physicsMs = performance.now() - physicsStart;
 
   if (steps === MAX_PHYSICS_STEPS && accumulatedTime >= TIME_STEP) {
     accumulatedTime = 0;
   }
 
+  const renderStart = performance.now();
   renderParticles();
 
   const ballPosition = ballBody.GetPosition();
   pixiDragBall.x = ballPosition.x * METER;
   pixiDragBall.y = ballPosition.y * METER;
+  app.renderer.render(stage);
+  const renderMs = performance.now() - renderStart;
+  frameStats.end();
+
+  recordMetric(performanceStats.physics, physicsMs);
+  recordMetric(performanceStats.render, renderMs);
+  performanceStats.physicsSteps = steps;
+  performanceStats.fps = frameDurationMs > 0 ? 1000 / frameDurationMs : TARGET_FPS;
+  performanceStats.frameCount += 1;
+
+  if (performanceStats.frameCount % STATS_UPDATE_INTERVAL === 0) {
+    updateStatsPanel();
+  }
 
   requestAnimationFrame(handleTick);
 }
