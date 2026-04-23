@@ -3,7 +3,6 @@ import {
   Graphics,
   Particle,
   ParticleContainer,
-  Text,
   Texture,
 } from "pixi.js";
 // liquidfun-wasm public sources:
@@ -11,15 +10,6 @@ import {
 // GitHub: https://github.com/Birch-san/box2d-wasm/tree/liquidfun/box2d-wasm
 // original LiquidFun upstream: https://github.com/google/liquidfun
 import Box2DFactory from "liquidfun-wasm";
-
-let Box2D;
-let world;
-let particleSystem;
-let groundBody;
-let ballBody;
-let ballFixture;
-let mouseJoint = null;
-let dragTarget = null;
 
 const METER = 100;
 const TIME_STEP = 1 / 60;
@@ -30,74 +20,69 @@ const VELOCITY_ITERATIONS = 1;
 const POSITION_ITERATIONS = 1;
 const SIZE_PARTICLE = 4;
 const SIZE_DRAGBLE = 50;
-const PARTICLE_FPS_FLOOR = 58;
-const PARTICLE_TUNE_WARMUP_FRAMES = 45;
-const PARTICLE_TUNE_SAMPLE_FRAMES = 90;
-// Use two budgets only: a conservative general-desktop target and a low-end fallback.
-const PARTICLE_PRESETS = [
-  { id: "low", halfWidth: 224, halfHeight: 128 },
-  { id: "high", halfWidth: 317, halfHeight: 221 },
-];
-
-let windowW = innerWidth;
-let windowH = innerHeight;
+const PARTICLE_HALF_WIDTH = 317;
+const PARTICLE_HALF_HEIGHT = 221;
 const dpi = devicePixelRatio ?? 1;
 
-const performanceLevel = resolvePerformanceLevel();
-let particlePresetIndex = selectInitialParticlePresetIndex();
+const Box2D = await Box2DFactory();
 
-let app;
-let stage;
-let pixiDragBall;
-let fluidContainer;
-let fpsLabel;
-let particleTexture;
-const pixiParticles = [];
+const app = new Application();
+await app.init({
+  width: innerWidth,
+  height: innerHeight,
+  resolution: dpi,
+  autoDensity: true,
+  resizeTo: globalThis,
+  preference: "webgpu",
+});
+document.body.appendChild(app.canvas);
 
+const stage = app.stage;
+stage.eventMode = "static";
+
+const windowW = app.screen.width;
+const windowH = app.screen.height;
+const gravity = new Box2D.b2Vec2(0, 10);
+const world = new Box2D.b2World(gravity);
+const groundBody = world.CreateBody(new Box2D.b2BodyDef());
+
+createPhysicsWalls();
+const { particleSystem, particleCount: currentParticleCount } = createPhysicsParticles();
+const ballBody = createPhysicsBall();
+const { pixiDragBall, pixiParticles } = createPixiWorld();
+const particleIterations = world.CalculateReasonableParticleIterations(TIME_STEP);
+
+let mouseJoint = null;
+let dragTarget = null;
 let activePointerId = null;
 let isDragging = false;
-let particleIterations = 1;
 let lastFrameTime = null;
 let accumulatedTime = 0;
-let currentParticleCount = 0;
-let displayedFps = TARGET_FPS;
-let lastStatsUpdateAt = 0;
-let particleTuneWarmupFrames = PARTICLE_TUNE_WARMUP_FRAMES;
-let particleTuneSampleFrames = 0;
-let particleTuneSampleFpsTotal = 0;
-let particleBudgetLocked = false;
 
-init();
+const devtoolsStats = {
+  extension: {
+    type: "stats",
+    name: "liquidfun-stats",
+  },
+  track(container, state) {
+    if (container !== stage) {
+      return;
+    }
+    state.fps = Math.round(Number.isFinite(app.ticker.FPS) ? app.ticker.FPS : TARGET_FPS);
+    state.particleCount = currentParticleCount;
+  },
+  getKeys() {
+    return ["fps", "particleCount"];
+  },
+};
 
-function resolvePerformanceLevel() {
-  const ua = navigator.userAgent ?? "";
-  const narrow = innerWidth < 640;
-  const coarsePhone =
-    /iPhone|Android.*Mobile/i.test(ua) ||
-    (narrow && navigator.maxTouchPoints > 0);
-  return coarsePhone ? "low" : "high";
-}
+globalThis.__PIXI_DEVTOOLS__ = {
+  app,
+  extensions: [devtoolsStats],
+};
 
-function selectInitialParticlePresetIndex() {
-  const deviceMemory = navigator.deviceMemory ?? 8;
-  const hardwareConcurrency = navigator.hardwareConcurrency ?? 8;
-
-  if (performanceLevel === "low") {
-    return 0;
-  }
-  if (deviceMemory <= 4 || hardwareConcurrency <= 4) {
-    return 0;
-  }
-  return 1;
-}
-
-function resetParticleBudgetSampling() {
-  particleTuneWarmupFrames = PARTICLE_TUNE_WARMUP_FRAMES;
-  particleTuneSampleFrames = 0;
-  particleTuneSampleFpsTotal = 0;
-  displayedFps = TARGET_FPS;
-  lastStatsUpdateAt = 0;
-}
+setupDragEvent();
+requestAnimationFrame(handleTick);
 
 function screenToWorld(sx, sy) {
   return { x: sx / METER, y: sy / METER };
@@ -105,6 +90,7 @@ function screenToWorld(sx, sy) {
 
 function clientToPixiGlobal(clientX, clientY) {
   const rect = app.canvas.getBoundingClientRect();
+
   return {
     x: ((clientX - rect.left) / rect.width) * app.screen.width,
     y: ((clientY - rect.top) / rect.height) * app.screen.height,
@@ -115,14 +101,11 @@ function getPointerWorld(eventLike) {
   if (eventLike.global) {
     return screenToWorld(eventLike.global.x, eventLike.global.y);
   }
+
   const nativeEvent = eventLike.nativeEvent ?? eventLike;
   const point = clientToPixiGlobal(nativeEvent.clientX ?? 0, nativeEvent.clientY ?? 0);
-  return screenToWorld(point.x, point.y);
-}
 
-function updateWindowSize() {
-  windowW = app.screen.width;
-  windowH = app.screen.height;
+  return screenToWorld(point.x, point.y);
 }
 
 function createPhysicsWalls() {
@@ -162,13 +145,12 @@ function createPhysicsParticles() {
   particleSystemDef.radius = SIZE_PARTICLE / METER;
   particleSystemDef.pressureStrength = 4.0;
   particleSystemDef.strictContactCheck = true;
-  particleSystem = world.CreateParticleSystem(particleSystemDef);
 
+  const particleSystem = world.CreateParticleSystem(particleSystemDef);
   const box = new Box2D.b2PolygonShape();
-  const { halfWidth, halfHeight } = PARTICLE_PRESETS[particlePresetIndex];
   box.SetAsBox(
-    halfWidth / METER,
-    halfHeight / METER,
+    PARTICLE_HALF_WIDTH / METER,
+    PARTICLE_HALF_HEIGHT / METER,
     new Box2D.b2Vec2(windowW / 2 / METER, -windowH / 2 / METER),
     0
   );
@@ -176,7 +158,11 @@ function createPhysicsParticles() {
   const particleGroupDef = new Box2D.b2ParticleGroupDef();
   particleGroupDef.shape = box;
   particleSystem.CreateParticleGroup(particleGroupDef);
-  currentParticleCount = particleSystem.GetParticleCount();
+
+  return {
+    particleSystem,
+    particleCount: particleSystem.GetParticleCount(),
+  };
 }
 
 function createPhysicsBall() {
@@ -187,20 +173,19 @@ function createPhysicsBall() {
   const circle = new Box2D.b2CircleShape();
   circle.m_radius = SIZE_DRAGBLE / METER;
 
-  ballBody = world.CreateBody(bodyDef);
-  ballFixture = ballBody.CreateFixture(circle, 8);
+  const ballBody = world.CreateBody(bodyDef);
+  const ballFixture = ballBody.CreateFixture(circle, 8);
   ballFixture.SetFriction(0.1);
   ballFixture.SetRestitution(0.1);
+
+  return ballBody;
 }
 
-function createParticleTexture() {
-  if (particleTexture) {
-    return particleTexture;
-  }
-
+function createPixiWorld() {
   const canvas = document.createElement("canvas");
   canvas.width = SIZE_PARTICLE * 2 * dpi;
   canvas.height = SIZE_PARTICLE * 2 * dpi;
+
   const ctx = canvas.getContext("2d");
   ctx.beginPath();
   ctx.arc(
@@ -212,32 +197,19 @@ function createParticleTexture() {
   );
   ctx.fillStyle = "white";
   ctx.fill();
-  particleTexture = Texture.from(canvas);
-  return particleTexture;
-}
 
-function rebuildPixiParticles() {
-  for (const particle of pixiParticles) {
-    particle.destroy();
-  }
-  pixiParticles.length = 0;
-
-  if (fluidContainer) {
-    stage.removeChild(fluidContainer);
-    fluidContainer.destroy();
-  }
-
-  fluidContainer = new ParticleContainer({
+  const particleTexture = Texture.from(canvas);
+  const fluidContainer = new ParticleContainer({
     dynamicProperties: {
       position: true,
     },
   });
   stage.addChildAt(fluidContainer, 0);
 
-  const texture = createParticleTexture();
+  const pixiParticles = [];
   for (let i = 0; i < currentParticleCount; i++) {
     const shape = new Particle({
-      texture,
+      texture: particleTexture,
       x: 0,
       y: 0,
       scaleX: 1 / dpi,
@@ -246,45 +218,17 @@ function rebuildPixiParticles() {
       anchorY: 0.5,
     });
     fluidContainer.addParticle(shape);
-    pixiParticles[i] = shape;
+    pixiParticles.push(shape);
   }
-}
 
-function createPixiWorld() {
-  rebuildPixiParticles();
-
-  pixiDragBall = new Graphics();
+  const pixiDragBall = new Graphics();
   pixiDragBall.circle(0, 0, SIZE_DRAGBLE);
   pixiDragBall.fill({ color: 0x990000 });
   pixiDragBall.eventMode = "static";
   pixiDragBall.cursor = "pointer";
   stage.addChild(pixiDragBall);
 
-  fpsLabel = new Text({
-    text: "FPS: --",
-    style: {
-      fill: 0xffffff,
-      fontFamily: "monospace",
-      fontSize: 16,
-      stroke: { color: 0x000000, width: 3 },
-    },
-  });
-  fpsLabel.x = 12;
-  fpsLabel.y = 10;
-  stage.addChild(fpsLabel);
-}
-
-function rebuildParticleSystem() {
-  if (particleSystem) {
-    world.DestroyParticleSystem(particleSystem);
-    particleSystem = null;
-  }
-
-  createPhysicsParticles();
-  rebuildPixiParticles();
-  particleIterations = world.CalculateReasonableParticleIterations(TIME_STEP);
-  particleBudgetLocked = false;
-  resetParticleBudgetSampling();
+  return { pixiDragBall, pixiParticles };
 }
 
 function createMouseJoint(targetPoint) {
@@ -316,6 +260,7 @@ function createMouseJoint(targetPoint) {
 
 function destroyMouseJoint() {
   if (!mouseJoint) return;
+
   world.DestroyJoint(mouseJoint);
   mouseJoint = null;
 }
@@ -330,6 +275,7 @@ function setupDragEvent() {
     ) {
       return;
     }
+
     const p = getPointerWorld(event);
     dragTarget.Set(p.x, p.y);
     mouseJoint.SetTarget(dragTarget);
@@ -369,11 +315,8 @@ function setupDragEvent() {
 
     isDragging = true;
     const p = getPointerWorld(event);
-    if (!dragTarget) {
-      dragTarget = new Box2D.b2Vec2(p.x, p.y);
-    } else {
-      dragTarget.Set(p.x, p.y);
-    }
+    dragTarget ??= new Box2D.b2Vec2(p.x, p.y);
+    dragTarget.Set(p.x, p.y);
     createMouseJoint(p);
 
     addEventListener("pointermove", onPointerMove, true);
@@ -402,52 +345,12 @@ function stepPhysics() {
   );
 }
 
-function maybeTuneParticleBudget(measuredFps) {
-  if (particleBudgetLocked || isDragging) {
-    return;
-  }
-  if (particleTuneWarmupFrames > 0) {
-    particleTuneWarmupFrames--;
-    return;
-  }
-
-  particleTuneSampleFrames++;
-  particleTuneSampleFpsTotal += measuredFps;
-
-  if (particleTuneSampleFrames < PARTICLE_TUNE_SAMPLE_FRAMES) {
-    return;
-  }
-
-  const averageFps = particleTuneSampleFpsTotal / particleTuneSampleFrames;
-  if (averageFps < PARTICLE_FPS_FLOOR && particlePresetIndex > 0) {
-    particlePresetIndex--;
-    rebuildParticleSystem();
-    return;
-  }
-
-  particleBudgetLocked = true;
-}
-
-function updateStatsLabel(frameTime, displayFps) {
-  const safeDisplayFps = Number.isFinite(displayFps) ? displayFps : TARGET_FPS;
-  displayedFps += (safeDisplayFps - displayedFps) * 0.15;
-  if (frameTime - lastStatsUpdateAt < 250) {
-    return;
-  }
-
-  lastStatsUpdateAt = frameTime;
-  fpsLabel.text =
-    `FPS: ${Math.round(displayedFps)} | ` +
-    `Particles: ${currentParticleCount.toLocaleString()}`;
-}
-
 function handleTick(frameTime) {
   if (lastFrameTime == null) {
     lastFrameTime = frameTime;
   }
 
   const rawElapsed = Math.max((frameTime - lastFrameTime) / 1000, 0);
-  const measuredFps = rawElapsed > 0 ? 1 / rawElapsed : TARGET_FPS;
   const elapsed = Math.min(rawElapsed, MAX_FRAME_DELTA);
   lastFrameTime = frameTime;
   accumulatedTime += elapsed;
@@ -468,41 +371,6 @@ function handleTick(frameTime) {
   const ballPosition = ballBody.GetPosition();
   pixiDragBall.x = ballPosition.x * METER;
   pixiDragBall.y = ballPosition.y * METER;
-  maybeTuneParticleBudget(measuredFps);
-  updateStatsLabel(frameTime, app.ticker.FPS);
 
-  requestAnimationFrame(handleTick);
-}
-
-async function init() {
-  Box2D = await Box2DFactory();
-
-  app = new Application();
-  await app.init({
-    width: innerWidth,
-    height: innerHeight,
-    resolution: dpi,
-    autoDensity: true,
-    resizeTo: globalThis,
-    preference: "webgpu",
-  });
-  document.body.appendChild(app.canvas);
-  stage = app.stage;
-  stage.eventMode = "static";
-
-  updateWindowSize();
-
-  const gravity = new Box2D.b2Vec2(0, 10);
-  world = new Box2D.b2World(gravity);
-  groundBody = world.CreateBody(new Box2D.b2BodyDef());
-
-  createPhysicsWalls();
-  createPhysicsParticles();
-  createPhysicsBall();
-  createPixiWorld();
-  setupDragEvent();
-
-  particleIterations = world.CalculateReasonableParticleIterations(TIME_STEP);
-  resetParticleBudgetSampling();
   requestAnimationFrame(handleTick);
 }
