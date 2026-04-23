@@ -20,10 +20,12 @@ const VELOCITY_ITERATIONS = 1;
 const POSITION_ITERATIONS = 1;
 const SIZE_PARTICLE = 4;
 const SIZE_DRAGBLE = 50;
+// 粒子数は可変にせず、現状の見た目と性能で詰めた量を固定値として持つ。
 const PARTICLE_HALF_WIDTH = 317;
 const PARTICLE_HALF_HEIGHT = 221;
 const dpi = devicePixelRatio ?? 1;
 
+// このデモはモジュール読込完了後すぐ起動したいので、初期化はトップレベルで実行する。
 const Box2D = await Box2DFactory();
 
 const app = new Application();
@@ -40,24 +42,31 @@ document.body.appendChild(app.canvas);
 const stage = app.stage;
 stage.eventMode = "static";
 
-const windowW = app.screen.width;
-const windowH = app.screen.height;
+// LiquidFun 側は Pixi の resizeTo を知らないので、物理世界は自前で管理する。
 const gravity = new Box2D.b2Vec2(0, 10);
 const world = new Box2D.b2World(gravity);
 const groundBody = world.CreateBody(new Box2D.b2BodyDef());
+
+// 壁はリサイズ時にまとめて作り直すので、body の参照だけ配列で持つ。
+let wallBodies = [];
 
 createPhysicsWalls();
 const { particleSystem, particleCount: currentParticleCount } = createPhysicsParticles();
 const ballBody = createPhysicsBall();
 const { pixiDragBall, pixiParticles } = createPixiWorld();
 const particleIterations = world.CalculateReasonableParticleIterations(TIME_STEP);
+const initialWorldWidth = getWorldWidth();
+const initialWorldHeight = getWorldHeight();
 
+// ドラッグ中だけ変わる値は、分散させずにこの付近へまとめて置く。
 let mouseJoint = null;
 let dragTarget = null;
 let activePointerId = null;
 let isDragging = false;
 let lastFrameTime = null;
 let accumulatedTime = 0;
+let appliedWorldWidth = initialWorldWidth;
+let appliedWorldHeight = initialWorldHeight;
 
 const devtoolsStats = {
   extension: {
@@ -65,6 +74,7 @@ const devtoolsStats = {
     name: "liquidfun-stats",
   },
   track(container, state) {
+    // Devtools 上ではシーン全体の値として見たいので、root stage にだけ紐付ける。
     if (container !== stage) {
       return;
     }
@@ -85,10 +95,12 @@ setupDragEvent();
 requestAnimationFrame(handleTick);
 
 function screenToWorld(sx, sy) {
+  // Box2D 側はメートル単位、Pixi 側はピクセル単位なのでここで変換する。
   return { x: sx / METER, y: sy / METER };
 }
 
 function clientToPixiGlobal(clientX, clientY) {
+  // CSS ピクセル基準のポインタ座標を、Pixi の内部解像度座標へ合わせる。
   const rect = app.canvas.getBoundingClientRect();
 
   return {
@@ -98,6 +110,7 @@ function clientToPixiGlobal(clientX, clientY) {
 }
 
 function getPointerWorld(eventLike) {
+  // Pixi の pointer event とネイティブ event の両方を同じ関数で扱う。
   if (eventLike.global) {
     return screenToWorld(eventLike.global.x, eventLike.global.y);
   }
@@ -108,39 +121,63 @@ function getPointerWorld(eventLike) {
   return screenToWorld(point.x, point.y);
 }
 
+function getWorldWidth() {
+  return app.screen.width;
+}
+
+function getWorldHeight() {
+  return app.screen.height;
+}
+
+function createStaticWall(shape) {
+  const body = world.CreateBody(new Box2D.b2BodyDef());
+  body.CreateFixture(shape, 0);
+  return body;
+}
+
 function createPhysicsWalls() {
-  const density = 0;
-  const wallsBody = world.CreateBody(new Box2D.b2BodyDef());
+  // fixture を列挙しながら破棄すると実装依存で壊れやすいので、壁 body ごと作り直す。
+  const worldWidth = getWorldWidth();
+  const worldHeight = getWorldHeight();
+
+  for (const wallBody of wallBodies) {
+    world.DestroyBody(wallBody);
+  }
+  wallBodies = [];
 
   const groundShape = new Box2D.b2PolygonShape();
   groundShape.SetAsBox(
-    windowW / METER / 2,
+    worldWidth / METER / 2,
     5 / METER,
-    new Box2D.b2Vec2(windowW / METER / 2, windowH / METER + 0.05),
+    new Box2D.b2Vec2(worldWidth / METER / 2, worldHeight / METER + 0.05),
     0
   );
-  wallsBody.CreateFixture(groundShape, density);
+  wallBodies.push(createStaticWall(groundShape));
 
   const leftWall = new Box2D.b2PolygonShape();
   leftWall.SetAsBox(
     5 / METER,
-    windowH / METER / 2,
-    new Box2D.b2Vec2(-0.05, windowH / METER / 2),
+    worldHeight / METER / 2,
+    new Box2D.b2Vec2(-0.05, worldHeight / METER / 2),
     0
   );
-  wallsBody.CreateFixture(leftWall, density);
+  wallBodies.push(createStaticWall(leftWall));
 
   const rightWall = new Box2D.b2PolygonShape();
   rightWall.SetAsBox(
     5 / METER,
-    windowH / METER / 2,
-    new Box2D.b2Vec2(windowW / METER + 0.05, windowH / METER / 2),
+    worldHeight / METER / 2,
+    new Box2D.b2Vec2(worldWidth / METER + 0.05, worldHeight / METER / 2),
     0
   );
-  wallsBody.CreateFixture(rightWall, density);
+  wallBodies.push(createStaticWall(rightWall));
 }
 
 function createPhysicsParticles() {
+  const worldWidth = getWorldWidth();
+  const worldHeight = getWorldHeight();
+
+  // 粒子は一つの塊として画面上方に作り、落下させて水たまりを作る。
   const particleSystemDef = new Box2D.b2ParticleSystemDef();
   particleSystemDef.radius = SIZE_PARTICLE / METER;
   particleSystemDef.pressureStrength = 4.0;
@@ -151,7 +188,7 @@ function createPhysicsParticles() {
   box.SetAsBox(
     PARTICLE_HALF_WIDTH / METER,
     PARTICLE_HALF_HEIGHT / METER,
-    new Box2D.b2Vec2(windowW / 2 / METER, -windowH / 2 / METER),
+    new Box2D.b2Vec2(worldWidth / 2 / METER, -worldHeight / 2 / METER),
     0
   );
 
@@ -166,9 +203,13 @@ function createPhysicsParticles() {
 }
 
 function createPhysicsBall() {
+  const worldWidth = getWorldWidth();
+  const worldHeight = getWorldHeight();
+
+  // 赤い球は最初は画面外上部から落として、流体と自然に接触させる。
   const bodyDef = new Box2D.b2BodyDef();
   bodyDef.type = Box2D.b2_dynamicBody;
-  bodyDef.position.Set(windowW / 2 / METER, (-windowH * 1.5) / METER);
+  bodyDef.position.Set(worldWidth / 2 / METER, (-worldHeight * 1.5) / METER);
 
   const circle = new Box2D.b2CircleShape();
   circle.m_radius = SIZE_DRAGBLE / METER;
@@ -182,6 +223,7 @@ function createPhysicsBall() {
 }
 
 function createPixiWorld() {
+  // 粒子は全て同じ見た目なので、1枚の小さな円テクスチャを共有して描画する。
   const canvas = document.createElement("canvas");
   canvas.width = SIZE_PARTICLE * 2 * dpi;
   canvas.height = SIZE_PARTICLE * 2 * dpi;
@@ -199,6 +241,7 @@ function createPixiWorld() {
   ctx.fill();
 
   const particleTexture = Texture.from(canvas);
+  // 座標だけ毎フレーム更新したいので、ParticleContainer を使って描画負荷を抑える。
   const fluidContainer = new ParticleContainer({
     dynamicProperties: {
       position: true,
@@ -234,6 +277,7 @@ function createPixiWorld() {
 function createMouseJoint(targetPoint) {
   if (mouseJoint) return;
 
+  // 直接座標を書き換えると慣性が消えるので、MouseJoint で物理のまま引っ張る。
   const jointDef = new Box2D.b2MouseJointDef();
   jointDef.bodyA = groundBody;
   jointDef.bodyB = ballBody;
@@ -278,6 +322,7 @@ function setupDragEvent() {
 
     const p = getPointerWorld(event);
     dragTarget.Set(p.x, p.y);
+    // 目標点だけを更新し、球の追従と慣性は Box2D 側へ任せる。
     mouseJoint.SetTarget(dragTarget);
   }
 
@@ -315,6 +360,7 @@ function setupDragEvent() {
 
     isDragging = true;
     const p = getPointerWorld(event);
+    // ベクトルの再生成を避けるため、dragTarget は使い回す。
     dragTarget ??= new Box2D.b2Vec2(p.x, p.y);
     dragTarget.Set(p.x, p.y);
     createMouseJoint(p);
@@ -326,6 +372,7 @@ function setupDragEvent() {
 }
 
 function renderParticles() {
+  // LiquidFun の位置バッファをそのまま読み出して、Pixi 側へ転写する。
   const positionBuffer = particleSystem.GetPositionBuffer();
   const offset = Box2D.getPointer(positionBuffer) >> 2;
 
@@ -345,15 +392,48 @@ function stepPhysics() {
   );
 }
 
+function clampBallToViewport() {
+  // リサイズで画面が急に小さくなったときだけ、赤い球を可視範囲へ戻す。
+  const radius = SIZE_DRAGBLE / METER;
+  const worldWidth = getWorldWidth() / METER;
+  const worldHeight = getWorldHeight() / METER;
+  const position = ballBody.GetPosition();
+  const clampedX = Math.min(Math.max(position.x, radius), worldWidth - radius);
+  const clampedY = Math.min(position.y, worldHeight - radius);
+
+  if (clampedX === position.x && clampedY === position.y) {
+    return;
+  }
+
+  ballBody.SetTransform(new Box2D.b2Vec2(clampedX, clampedY), ballBody.GetAngle());
+}
+
+function syncViewportToPhysics() {
+  // resize event の最中に LiquidFun を触ると壊れやすいので、反映はメインループ内へ寄せる。
+  const worldWidth = getWorldWidth();
+  const worldHeight = getWorldHeight();
+
+  if (worldWidth === appliedWorldWidth && worldHeight === appliedWorldHeight) {
+    return;
+  }
+
+  appliedWorldWidth = worldWidth;
+  appliedWorldHeight = worldHeight;
+  createPhysicsWalls();
+  clampBallToViewport();
+}
+
 function handleTick(frameTime) {
   if (lastFrameTime == null) {
     lastFrameTime = frameTime;
   }
 
+  // 固定 60 Hz で進めて、144 Hz などの高リフレッシュ環境でも倍速にならないようにする。
   const rawElapsed = Math.max((frameTime - lastFrameTime) / 1000, 0);
   const elapsed = Math.min(rawElapsed, MAX_FRAME_DELTA);
   lastFrameTime = frameTime;
   accumulatedTime += elapsed;
+  syncViewportToPhysics();
 
   let steps = 0;
   while (accumulatedTime >= TIME_STEP && steps < MAX_PHYSICS_STEPS) {
