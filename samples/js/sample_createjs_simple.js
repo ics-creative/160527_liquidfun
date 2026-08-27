@@ -77,9 +77,9 @@ function createPhysicsWalls() {
     5 / METER, // 高さ
     new b2Vec2(
       windowW / METER / 2, // X座標
-      windowH / METER + 0.05
+      windowH / METER + 0.05,
     ), // Y座標
-    0
+    0,
   );
   bobo.CreateFixtureFromShape(wg, density);
 
@@ -90,9 +90,9 @@ function createPhysicsWalls() {
     windowH / METER / 2, // 高さ
     new b2Vec2(
       -0.05, // X座標
-      windowH / METER / 2
+      windowH / METER / 2,
     ), // Y座標
-    0
+    0,
   );
   bobo.CreateFixtureFromShape(wgl, density);
 
@@ -103,9 +103,9 @@ function createPhysicsWalls() {
     windowH / METER / 2, // 高さ
     new b2Vec2(
       windowW / METER + 0.05, // X座標
-      windowH / METER / 2
+      windowH / METER / 2,
     ), // Y座標
-    0
+    0,
   );
   bobo.CreateFixtureFromShape(wgr, density);
 }
@@ -124,9 +124,9 @@ function createPhysicsParticles() {
     256 / METER, // 高さ
     new b2Vec2(
       windowW / 2 / METER, // 発生X座標
-      -windowH / 2 / METER
+      -windowH / 2 / METER,
     ), // 発生Y座標
-    0
+    0,
   );
   var particleGroupDef = new b2ParticleGroupDef();
   particleGroupDef.shape = box; // 発生矩形を登録
@@ -139,7 +139,7 @@ function createPhysicsBall() {
   bd.type = b2_dynamicBody;
   bd.position.Set(
     windowW / 2 / METER, // 発生X座標
-    -windowH / METER // 発生Y座標
+    -windowH / METER, // 発生Y座標
   );
   // 形状を設定
   var circle = new b2CircleShape();
@@ -209,7 +209,7 @@ function handleTick() {
 
 /** ドラッグイベントを設定します。 */
 function setupDragEvent() {
-  _cjsDragBall.on("mousedown", function(event) {
+  _cjsDragBall.on("mousedown", function (event) {
     var p = getMouseCoords(event);
     var aabb = new b2AABB();
     aabb.lowerBound.Set(p.x - 0.001, p.y - 0.001);
@@ -228,14 +228,14 @@ function setupDragEvent() {
       body.SetAwake(true);
     }
   });
-  _cjsDragBall.on("pressmove", function(event) {
+  _cjsDragBall.on("pressmove", function (event) {
     var p = getMouseCoords(event);
     if (_b2MouseJoint) {
       // マウスジョイントの対象座標を更新
       _b2MouseJoint.SetTarget(p);
     }
   });
-  _cjsDragBall.on("pressup", function(event) {
+  _cjsDragBall.on("pressup", function (event) {
     if (_b2MouseJoint) {
       // マウスジョイントを破棄
       world.DestroyJoint(_b2MouseJoint);
@@ -262,7 +262,7 @@ function QueryCallback(point) {
   this.fixture = null;
 }
 /**@return bool 当たり判定があれば true を返します。 */
-QueryCallback.prototype.ReportFixture = function(fixture) {
+QueryCallback.prototype.ReportFixture = function (fixture) {
   var body = fixture.body;
   if (body.GetType() === b2_dynamicBody) {
     var inside = fixture.TestPoint(this.point);

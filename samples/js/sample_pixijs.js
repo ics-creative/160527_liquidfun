@@ -28,7 +28,10 @@ const dpi = devicePixelRatio ?? 1;
 const STATS_JS_URL = "https://mrdoob.github.io/stats.js/build/stats.min.js";
 
 // このデモはモジュール読込完了後すぐ起動したいので、初期化はトップレベルで実行する。
-const [Box2D, Stats] = await Promise.all([Box2DFactory(), loadStatsConstructor()]);
+const [Box2D, Stats] = await Promise.all([
+  Box2DFactory(),
+  loadStatsConstructor(),
+]);
 
 const app = new Application();
 await app.init({
@@ -58,10 +61,12 @@ const groundBody = world.CreateBody(new Box2D.b2BodyDef());
 let wallBodies = [];
 
 createPhysicsWalls();
-const { particleSystem, particleCount: currentParticleCount } = createPhysicsParticles();
+const { particleSystem, particleCount: currentParticleCount } =
+  createPhysicsParticles();
 const ballBody = createPhysicsBall();
 const { pixiDragBall, pixiParticles } = createPixiWorld();
-const particleIterations = world.CalculateReasonableParticleIterations(TIME_STEP);
+const particleIterations =
+  world.CalculateReasonableParticleIterations(TIME_STEP);
 const initialWorldWidth = getWorldWidth();
 const initialWorldHeight = getWorldHeight();
 
@@ -143,7 +148,10 @@ function getPointerWorld(eventLike) {
   }
 
   const nativeEvent = eventLike.nativeEvent ?? eventLike;
-  const point = clientToPixiGlobal(nativeEvent.clientX ?? 0, nativeEvent.clientY ?? 0);
+  const point = clientToPixiGlobal(
+    nativeEvent.clientX ?? 0,
+    nativeEvent.clientY ?? 0,
+  );
 
   return screenToWorld(point.x, point.y);
 }
@@ -175,7 +183,9 @@ function loadStatsConstructor() {
       reject(new Error(`Failed to load stats.js from ${STATS_JS_URL}`));
     };
 
-    const existingScript = document.querySelector('script[data-stats-js="true"]');
+    const existingScript = document.querySelector(
+      'script[data-stats-js="true"]',
+    );
     if (existingScript) {
       existingScript.addEventListener("load", onLoad, { once: true });
       existingScript.addEventListener("error", onError, { once: true });
@@ -268,7 +278,7 @@ function createPhysicsWalls() {
     worldWidth / METER / 2,
     5 / METER,
     new Box2D.b2Vec2(worldWidth / METER / 2, worldHeight / METER + 0.05),
-    0
+    0,
   );
   wallBodies.push(createStaticWall(groundShape));
 
@@ -277,7 +287,7 @@ function createPhysicsWalls() {
     5 / METER,
     worldHeight / METER / 2,
     new Box2D.b2Vec2(-0.05, worldHeight / METER / 2),
-    0
+    0,
   );
   wallBodies.push(createStaticWall(leftWall));
 
@@ -286,7 +296,7 @@ function createPhysicsWalls() {
     5 / METER,
     worldHeight / METER / 2,
     new Box2D.b2Vec2(worldWidth / METER + 0.05, worldHeight / METER / 2),
-    0
+    0,
   );
   wallBodies.push(createStaticWall(rightWall));
 }
@@ -307,7 +317,7 @@ function createPhysicsParticles() {
     PARTICLE_HALF_WIDTH / METER,
     PARTICLE_HALF_HEIGHT / METER,
     new Box2D.b2Vec2(worldWidth / 2 / METER, -worldHeight / 2 / METER),
-    0
+    0,
   );
 
   const particleGroupDef = new Box2D.b2ParticleGroupDef();
@@ -353,7 +363,7 @@ function createPixiWorld() {
     SIZE_PARTICLE * dpi,
     (SIZE_PARTICLE * dpi) / 2,
     0,
-    Math.PI * 2
+    Math.PI * 2,
   );
   ctx.fillStyle = "white";
   ctx.fill();
@@ -409,14 +419,17 @@ function createMouseJoint(targetPoint) {
     5,
     0.7,
     groundBody,
-    ballBody
+    ballBody,
   );
   const stiffnessOffset = stiffnessPtr >> 2;
   jointDef.stiffness = Box2D.HEAPF32[stiffnessOffset];
   jointDef.damping = Box2D.HEAPF32[stiffnessOffset + 1];
   Box2D._free(stiffnessPtr);
 
-  mouseJoint = Box2D.castObject(world.CreateJoint(jointDef), Box2D.b2MouseJoint);
+  mouseJoint = Box2D.castObject(
+    world.CreateJoint(jointDef),
+    Box2D.b2MouseJoint,
+  );
   ballBody.SetAwake(true);
 }
 
@@ -519,7 +532,7 @@ function stepPhysics() {
     TIME_STEP,
     VELOCITY_ITERATIONS,
     POSITION_ITERATIONS,
-    particleIterations
+    particleIterations,
   );
 }
 
@@ -536,7 +549,10 @@ function clampBallToViewport() {
     return;
   }
 
-  ballBody.SetTransform(new Box2D.b2Vec2(clampedX, clampedY), ballBody.GetAngle());
+  ballBody.SetTransform(
+    new Box2D.b2Vec2(clampedX, clampedY),
+    ballBody.GetAngle(),
+  );
 }
 
 function syncViewportToPhysics() {
@@ -595,7 +611,8 @@ function handleTick(frameTime) {
   recordMetric(performanceStats.physics, physicsMs);
   recordMetric(performanceStats.render, renderMs);
   performanceStats.physicsSteps = steps;
-  performanceStats.fps = frameDurationMs > 0 ? 1000 / frameDurationMs : TARGET_FPS;
+  performanceStats.fps =
+    frameDurationMs > 0 ? 1000 / frameDurationMs : TARGET_FPS;
   performanceStats.frameCount += 1;
 
   if (performanceStats.frameCount % STATS_UPDATE_INTERVAL === 0) {
