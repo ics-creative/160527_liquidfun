@@ -5,10 +5,10 @@
     "format": "prettier --write 'samples/js/*.js'"
   },
   "dependencies": {
-    "@types/createjs": "^0.0.29",
-    "pixi.js": "^5.0.0"
+    "@types/createjs": "^0.0.32",
+    "pixi.js": "^8.19.0"
   },
   "devDependencies": {
-    "prettier": "^1.17.0"
+    "prettier": "^3.9.5"
   }
 }
