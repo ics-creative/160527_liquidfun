@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LiquidFun-WASM PixiJS Trail Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <style>
+      body {
+        margin: 0;
+      }
+
+      canvas {
+        display: block;
+        touch-action: none;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.20.1/dist/pixi.min.mjs",
+          "liquidfun-wasm": "https://cdn.jsdelivr.net/npm/liquidfun-wasm@7.0.0/dist/es/entry.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import { Application, Graphics, GraphicsContext } from "pixi.js";
+      import Box2DFactory from "liquidfun-wasm";
+
+      // LiquidFunの1mを100pxとして描画する。
+      const METER = 100;
+      const SIZE_PARTICLE = 4;
+      const SIZE_DRAGGABLE = 50;
+      let width = innerWidth;
+      let height = innerHeight;
+
+      const Box2D = await Box2DFactory();
+      const app = new Application();
+      // Canvasを消去せず、前フレームを残して残像にする。
+      await app.init({
+        resizeTo: window,
+        preserveDrawingBuffer: true,
+        clearBeforeRender: false,
+      });
+      document.body.append(app.canvas);
+
+      // 半透明の黒を重ね、前フレームを徐々に消して残像にする。
+      const fade = new Graphics()
+        .rect(0, 0, width, height)
+        .fill({ color: 0x000000, alpha: 0.2 });
+      app.stage.addChild(fade);
+
+      const world = new Box2D.b2World(new Box2D.b2Vec2(0, 10));
+      // MouseJointの土台は固定し、リサイズ時は壁Bodyだけ作り直す。
+      const groundBody = world.CreateBody(new Box2D.b2BodyDef());
+      let wallBody = createWalls();
+
+      const particleSystem = createParticles();
+      // 固定のバッファ位置と反復回数は初期化時に一度だけ求める。
+      const positionOffset =
+        Box2D.getPointer(particleSystem.GetPositionBuffer()) >> 2;
+      const ballBody = createBall();
+      const particleIterations = world.CalculateReasonableParticleIterations(
+        1 / 60,
+      );
+      const { dragBall, particles } = createPixiObjects();
+
+      const dragTarget = new Box2D.b2Vec2();
+      let mouseJoint = null;
+
+      setupDrag();
+      app.ticker.add(update);
+
+      // 画面外へ流体が漏れないよう、下・左・右に壁を置く。
+      function createWalls() {
+        const body = world.CreateBody(new Box2D.b2BodyDef());
+
+        function addWall(halfWidth, halfHeight, x, y) {
+          const shape = new Box2D.b2PolygonShape();
+          shape.SetAsBox(halfWidth, halfHeight, new Box2D.b2Vec2(x, y), 0);
+          body.CreateFixture(shape, 0);
+        }
+
+        addWall(
+          width / METER / 2,
+          5 / METER,
+          width / METER / 2,
+          height / METER + 0.05,
+        );
+        addWall(5 / METER, height / METER / 2, -0.05, height / METER / 2);
+        addWall(
+          5 / METER,
+          height / METER / 2,
+          width / METER + 0.05,
+          height / METER / 2,
+        );
+        return body;
+      }
+
+      // 画面上部に粒子群を作り、重力で落とす。
+      function createParticles() {
+        const definition = new Box2D.b2ParticleSystemDef();
+        definition.radius = SIZE_PARTICLE / METER;
+        definition.pressureStrength = 4;
+
+        const system = world.CreateParticleSystem(definition);
+        const shape = new Box2D.b2PolygonShape();
+        shape.SetAsBox(
+          256 / METER,
+          256 / METER,
+          new Box2D.b2Vec2(width / METER / 2, -height / METER / 2),
+          0,
+        );
+
+        const group = new Box2D.b2ParticleGroupDef();
+        group.shape = shape;
+        system.CreateParticleGroup(group);
+        return system;
+      }
+
+      // 粒子と衝突し、ドラッグできる動的Bodyを作る。
+      function createBall() {
+        const definition = new Box2D.b2BodyDef();
+        definition.type = Box2D.b2_dynamicBody;
+        definition.position.Set(width / METER / 2, (-height * 2) / METER);
+
+        const shape = new Box2D.b2CircleShape();
+        shape.m_radius = SIZE_DRAGGABLE / METER;
+
+        const body = world.CreateBody(definition);
+        body.CreateFixture(shape, 8);
+        return body;
+      }
+
+      // LiquidFunのBodyに対応するPixiJSオブジェクトを作る。
+      function createPixiObjects() {
+        // 円の描画データを全粒子で共有する。
+        const particleContext = new GraphicsContext()
+          .circle(0, 0, 12)
+          .fill(0xffffff);
+
+        const count = particleSystem.GetParticleCount();
+        const particles = [];
+        for (let i = 0; i < count; i++) {
+          const particle = new Graphics(particleContext);
+          particle.scale.set(Math.random() * Math.random());
+          particle.tint = `hsl(${(i / count) * 100 + 180} ${Math.random() * 40 + 60}% 70%)`;
+          particle.alpha = 0.5;
+          particle.blendMode = Math.random() < 0.5 ? "normal" : "add";
+          app.stage.addChild(particle);
+          particles.push(particle);
+        }
+
+        const dragBall = new Graphics()
+          .circle(0, 0, SIZE_DRAGGABLE)
+          .fill(0x000000)
+          .stroke({ color: 0xffffff, width: 3 });
+        dragBall.eventMode = "static";
+        dragBall.cursor = "pointer";
+        app.stage.addChild(dragBall);
+
+        return { dragBall, particles };
+      }
+
+      function setDragTarget(event) {
+        const point = event.global ?? event;
+        dragTarget.Set(point.x / METER, point.y / METER);
+      }
+
+      // MouseJointでボールをポインターへ引き寄せる。
+      function setupDrag() {
+        dragBall.on("pointerdown", (event) => {
+          if (mouseJoint) return;
+          setDragTarget(event);
+
+          const definition = new Box2D.b2MouseJointDef();
+          definition.bodyA = groundBody;
+          definition.bodyB = ballBody;
+          definition.target = dragTarget;
+          // 剛性が0だとMouseJointがボールを引っ張らない。
+          const mass = ballBody.GetMass();
+          definition.maxForce = 1000 * mass;
+          definition.stiffness = 1000 * mass;
+          definition.damping = 50 * mass;
+
+          mouseJoint = Box2D.castObject(
+            world.CreateJoint(definition),
+            Box2D.b2MouseJoint,
+          );
+          ballBody.SetAwake(true);
+        });
+
+        addEventListener("pointermove", (event) => {
+          if (!mouseJoint) return;
+          setDragTarget(event);
+          mouseJoint.SetTarget(dragTarget);
+        });
+
+        const stopDrag = () => {
+          if (!mouseJoint) return;
+          world.DestroyJoint(mouseJoint);
+          mouseJoint = null;
+        };
+        addEventListener("pointerup", stopDrag);
+        addEventListener("pointercancel", stopDrag);
+      }
+
+      function resize() {
+        if (width === app.screen.width && height === app.screen.height) return;
+        width = app.screen.width;
+        height = app.screen.height;
+        fade.width = width;
+        fade.height = height;
+        world.DestroyBody(wallBody);
+        wallBody = createWalls();
+      }
+
+      function update(ticker) {
+        resize();
+        // 経過時間で進めるため、画面のリフレッシュレートに左右されない。
+        world.Step(ticker.deltaMS / 1000, 1, 1, particleIterations);
+
+        // LiquidFun WASMの座標をPixiJSへ同期する。
+        const positions = Box2D.HEAPF32;
+        for (let i = 0; i < particles.length; i++) {
+          const index = positionOffset + i * 2;
+          particles[i].position.set(
+            positions[index] * METER,
+            positions[index + 1] * METER,
+          );
+        }
+
+        const ballPosition = ballBody.GetPosition();
+        dragBall.position.set(ballPosition.x * METER, ballPosition.y * METER);
+      }
+    </script>
+  </head>
+  <body></body>
+</html>

@@ -1,53 +1,685 @@
-<!DOCTYPE html>
-<html lang="ja" dir="ltr">
-<head>
-  <meta charset="utf-8"/>
-  <title>LiquidFun-WASM PixiJS Demo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LiquidFun-WASM PixiJS Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      background: black;
-    }
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: black;
+      }
 
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
 
-    #statsPanel {
-      position: fixed;
-      top: 12px;
-      left: 96px;
-      z-index: 10;
-      max-width: calc(100vw - 108px);
-      margin: 0;
-      padding: 0;
-      border: 0;
-      background: none;
-      color: #ffffff;
-      font: 11px/1.2 "SFMono-Regular", "Menlo", "Consolas", monospace;
-      overflow: hidden;
-      pointer-events: none;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-  </style>
-  <script type="importmap">
-  {
-    "imports": {
-      "pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.20.1/dist/pixi.min.mjs",
-      "liquidfun-wasm": "https://cdn.jsdelivr.net/npm/liquidfun-wasm@7.0.0/dist/es/entry.js"
-    }
-  }
-  </script>
-  <script type="module" src="js/sample_pixijs.js"></script>
-</head>
-<body>
-  <div id="statsPanel"><code id="statsText">Loading stats...</code></div>
-</body>
+      .stats-panel {
+        position: fixed;
+        inset-block-start: 12px;
+        inset-inline-start: 96px;
+        z-index: 10;
+        max-inline-size: calc(100vw - 108px);
+        color: white;
+        font:
+          0.6875rem/1.2 ui-monospace,
+          "SFMono-Regular",
+          Menlo,
+          Consolas,
+          monospace;
+        overflow: hidden;
+        pointer-events: none;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8.20.1/dist/pixi.min.mjs",
+          "liquidfun-wasm": "https://cdn.jsdelivr.net/npm/liquidfun-wasm@7.0.0/dist/es/entry.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import {
+        Application,
+        Graphics,
+        Particle,
+        ParticleContainer,
+        Texture,
+      } from "pixi.js";
+      // liquidfun-wasm public sources:
+      // npm: https://www.npmjs.com/package/liquidfun-wasm
+      // GitHub: https://github.com/Birch-san/box2d-wasm/tree/liquidfun/box2d-wasm
+      // original LiquidFun upstream: https://github.com/google/liquidfun
+      import Box2DFactory from "liquidfun-wasm";
+
+      const METER = 100;
+      const TIME_STEP = 1 / 60;
+      const TARGET_FPS = 60;
+      const MAX_FRAME_DELTA = 0.25;
+      const MAX_PHYSICS_STEPS = 5;
+      const VELOCITY_ITERATIONS = 1;
+      const POSITION_ITERATIONS = 1;
+      const STATS_WINDOW_SIZE = 120;
+      const STATS_UPDATE_INTERVAL = 6;
+      const SIZE_PARTICLE = 4;
+      const SIZE_DRAGGABLE = 50;
+      // 生成領域を少し絞り、粒子数と物理演算の負荷を抑える。
+      const PARTICLE_HALF_WIDTH = 480;
+      const PARTICLE_HALF_HEIGHT = 320;
+      const dpi = devicePixelRatio;
+      const STATS_JS_URL =
+        "https://mrdoob.github.io/stats.js/build/stats.min.js";
+
+      // このデモはモジュール読込完了後すぐ起動したいので、初期化はトップレベルで実行する。
+      const [Box2D, Stats] = await Promise.all([
+        Box2DFactory(),
+        loadStatsConstructor(),
+      ]);
+
+      const app = new Application();
+      await app.init({
+        resolution: dpi,
+        autoDensity: true,
+        autoStart: false,
+        resizeTo: window,
+        preference: "webgpu",
+      });
+      document.body.append(app.canvas);
+
+      const stage = app.stage;
+      stage.eventMode = "static";
+
+      const statsText = document.querySelector("#stats-text");
+      const frameStats = createStatsMonitor(Stats);
+
+      // LiquidFun 側は Pixi の resizeTo を知らないので、物理世界は自前で管理する。
+      const gravity = new Box2D.b2Vec2(0, 10);
+      const world = new Box2D.b2World(gravity);
+      const groundBody = world.CreateBody(new Box2D.b2BodyDef());
+
+      // 壁はリサイズ時にまとめて作り直すので、body の参照だけ配列で持つ。
+      let wallBodies = [];
+
+      createPhysicsWalls();
+      const { particleSystem, particleCount: currentParticleCount } =
+        createPhysicsParticles();
+      const ballBody = createPhysicsBall();
+      const { pixiDragBall, pixiParticles } = createPixiWorld();
+      const particleIterations =
+        world.CalculateReasonableParticleIterations(TIME_STEP);
+      const initialWorldWidth = getWorldWidth();
+      const initialWorldHeight = getWorldHeight();
+
+      // ドラッグ中だけ変わる値は、分散させずにこの付近へまとめて置く。
+      let mouseJoint = null;
+      let dragTarget = null;
+      let activePointerId = null;
+      let isDragging = false;
+      let lastFrameTime = null;
+      let accumulatedTime = 0;
+      let appliedWorldWidth = initialWorldWidth;
+      let appliedWorldHeight = initialWorldHeight;
+      const performanceStats = {
+        fps: TARGET_FPS,
+        frameCount: 0,
+        physicsSteps: 0,
+        physics: createMetric(),
+        render: createMetric(),
+      };
+      const runtimeStats = {
+        particleCount: currentParticleCount,
+        fps: TARGET_FPS,
+        physicsMs: 0,
+        physicsAverageMs: 0,
+        physicsSteps: 0,
+        renderMs: 0,
+        renderAverageMs: 0,
+      };
+
+      const devtoolsStats = {
+        extension: {
+          type: "stats",
+          name: "liquidfun-stats",
+        },
+        track(container, state) {
+          // Devtools 上ではシーン全体の値として見たいので、root stage にだけ紐付ける。
+          if (container !== stage) {
+            return;
+          }
+          state.fps = Math.round(runtimeStats.fps);
+          state.particleCount = runtimeStats.particleCount;
+          state.physicsMs = Number(runtimeStats.physicsAverageMs.toFixed(2));
+          state.renderMs = Number(runtimeStats.renderAverageMs.toFixed(2));
+        },
+        getKeys() {
+          return ["fps", "particleCount", "physicsMs", "renderMs"];
+        },
+      };
+
+      globalThis.__PIXI_DEVTOOLS__ = {
+        app,
+        extensions: [devtoolsStats],
+      };
+      globalThis.__liquidfunStats = runtimeStats;
+
+      setupDragEvent();
+      updateStatsPanel();
+      requestAnimationFrame(handleTick);
+
+      function screenToWorld(sx, sy) {
+        // Box2D 側はメートル単位、Pixi 側はピクセル単位なのでここで変換する。
+        return { x: sx / METER, y: sy / METER };
+      }
+
+      function clientToPixiGlobal(clientX, clientY) {
+        // CSS ピクセル基準のポインタ座標を、Pixi の内部解像度座標へ合わせる。
+        const rect = app.canvas.getBoundingClientRect();
+
+        return {
+          x: ((clientX - rect.left) / rect.width) * app.screen.width,
+          y: ((clientY - rect.top) / rect.height) * app.screen.height,
+        };
+      }
+
+      function getPointerWorld(eventLike) {
+        // Pixi の pointer event とネイティブ event の両方を同じ関数で扱う。
+        if (eventLike.global) {
+          return screenToWorld(eventLike.global.x, eventLike.global.y);
+        }
+
+        const nativeEvent = eventLike.nativeEvent ?? eventLike;
+        const point = clientToPixiGlobal(
+          nativeEvent.clientX ?? 0,
+          nativeEvent.clientY ?? 0,
+        );
+
+        return screenToWorld(point.x, point.y);
+      }
+
+      function getWorldWidth() {
+        return app.screen.width;
+      }
+
+      function getWorldHeight() {
+        return app.screen.height;
+      }
+
+      function loadStatsConstructor() {
+        if (typeof globalThis.Stats === "function") {
+          return globalThis.Stats;
+        }
+
+        return new Promise((resolve, reject) => {
+          const onLoad = () => {
+            if (typeof globalThis.Stats === "function") {
+              resolve(globalThis.Stats);
+              return;
+            }
+
+            reject(new Error("stats.js loaded without exposing Stats"));
+          };
+
+          const onError = () => {
+            reject(new Error(`Failed to load stats.js from ${STATS_JS_URL}`));
+          };
+
+          const existingScript = document.querySelector(
+            'script[data-stats-js="true"]',
+          );
+          if (existingScript) {
+            existingScript.addEventListener("load", onLoad, { once: true });
+            existingScript.addEventListener("error", onError, { once: true });
+            return;
+          }
+
+          const script = document.createElement("script");
+          script.src = STATS_JS_URL;
+          script.async = true;
+          script.dataset.statsJs = "true";
+          script.addEventListener("load", onLoad, { once: true });
+          script.addEventListener("error", onError, { once: true });
+          document.head.append(script);
+        });
+      }
+
+      function createStatsMonitor(StatsConstructor) {
+        const stats = new StatsConstructor();
+        stats.showPanel(0);
+        stats.dom.style.top = "12px";
+        stats.dom.style.left = "12px";
+        stats.dom.style.zIndex = "20";
+        document.body.append(stats.dom);
+        return stats;
+      }
+
+      function createMetric() {
+        return {
+          currentMs: 0,
+          averageMs: 0,
+          samples: new Float32Array(STATS_WINDOW_SIZE),
+          sampleSum: 0,
+          sampleIndex: 0,
+          sampleCount: 0,
+        };
+      }
+
+      function recordMetric(metric, timeMs) {
+        metric.currentMs = timeMs;
+
+        if (metric.sampleCount === STATS_WINDOW_SIZE) {
+          metric.sampleSum -= metric.samples[metric.sampleIndex];
+        } else {
+          metric.sampleCount += 1;
+        }
+
+        metric.samples[metric.sampleIndex] = timeMs;
+        metric.sampleSum += timeMs;
+        metric.sampleIndex = (metric.sampleIndex + 1) % STATS_WINDOW_SIZE;
+        metric.averageMs = metric.sampleSum / metric.sampleCount;
+      }
+
+      function updateStatsPanel() {
+        runtimeStats.particleCount = currentParticleCount;
+        runtimeStats.fps = performanceStats.fps;
+        runtimeStats.physicsMs = performanceStats.physics.currentMs;
+        runtimeStats.physicsAverageMs = performanceStats.physics.averageMs;
+        runtimeStats.physicsSteps = performanceStats.physicsSteps;
+        runtimeStats.renderMs = performanceStats.render.currentMs;
+        runtimeStats.renderAverageMs = performanceStats.render.averageMs;
+
+        if (!statsText) {
+          return;
+        }
+
+        statsText.textContent = `${currentParticleCount.toLocaleString()} particles | physics ${performanceStats.physics.averageMs.toFixed(2)} ms avg | render ${performanceStats.render.averageMs.toFixed(2)} ms avg`;
+      }
+
+      function createStaticWall(shape) {
+        const body = world.CreateBody(new Box2D.b2BodyDef());
+        body.CreateFixture(shape, 0);
+        return body;
+      }
+
+      function createPhysicsWalls() {
+        // fixture を列挙しながら破棄すると実装依存で壊れやすいので、壁 body ごと作り直す。
+        const worldWidth = getWorldWidth();
+        const worldHeight = getWorldHeight();
+
+        for (const wallBody of wallBodies) {
+          world.DestroyBody(wallBody);
+        }
+        wallBodies = [];
+
+        const groundShape = new Box2D.b2PolygonShape();
+        groundShape.SetAsBox(
+          worldWidth / METER / 2,
+          5 / METER,
+          new Box2D.b2Vec2(worldWidth / METER / 2, worldHeight / METER + 0.05),
+          0,
+        );
+        wallBodies.push(createStaticWall(groundShape));
+
+        const leftWall = new Box2D.b2PolygonShape();
+        leftWall.SetAsBox(
+          5 / METER,
+          worldHeight / METER / 2,
+          new Box2D.b2Vec2(-0.05, worldHeight / METER / 2),
+          0,
+        );
+        wallBodies.push(createStaticWall(leftWall));
+
+        const rightWall = new Box2D.b2PolygonShape();
+        rightWall.SetAsBox(
+          5 / METER,
+          worldHeight / METER / 2,
+          new Box2D.b2Vec2(worldWidth / METER + 0.05, worldHeight / METER / 2),
+          0,
+        );
+        wallBodies.push(createStaticWall(rightWall));
+      }
+
+      function createPhysicsParticles() {
+        const worldWidth = getWorldWidth();
+        const worldHeight = getWorldHeight();
+
+        // 粒子は一つの塊として画面上方に作り、落下させて水たまりを作る。
+        const particleSystemDef = new Box2D.b2ParticleSystemDef();
+        particleSystemDef.radius = SIZE_PARTICLE / METER;
+        particleSystemDef.pressureStrength = 4;
+        particleSystemDef.strictContactCheck = true;
+
+        const particleSystem = world.CreateParticleSystem(particleSystemDef);
+        const box = new Box2D.b2PolygonShape();
+        box.SetAsBox(
+          PARTICLE_HALF_WIDTH / METER,
+          PARTICLE_HALF_HEIGHT / METER,
+          new Box2D.b2Vec2(worldWidth / 2 / METER, -worldHeight / 2 / METER),
+          0,
+        );
+
+        const particleGroupDef = new Box2D.b2ParticleGroupDef();
+        particleGroupDef.shape = box;
+        particleSystem.CreateParticleGroup(particleGroupDef);
+
+        return {
+          particleSystem,
+          particleCount: particleSystem.GetParticleCount(),
+        };
+      }
+
+      function createPhysicsBall() {
+        const worldWidth = getWorldWidth();
+        const worldHeight = getWorldHeight();
+
+        // 赤い球は最初は画面外上部から落として、流体と自然に接触させる。
+        const bodyDef = new Box2D.b2BodyDef();
+        bodyDef.type = Box2D.b2_dynamicBody;
+        bodyDef.position.Set(
+          worldWidth / 2 / METER,
+          (-worldHeight * 1.5) / METER,
+        );
+
+        const circle = new Box2D.b2CircleShape();
+        circle.m_radius = SIZE_DRAGGABLE / METER;
+
+        const ballBody = world.CreateBody(bodyDef);
+        const ballFixture = ballBody.CreateFixture(circle, 8);
+        ballFixture.SetFriction(0.1);
+        ballFixture.SetRestitution(0.1);
+
+        return ballBody;
+      }
+
+      function createPixiWorld() {
+        // 粒子は全て同じ見た目なので、1枚の小さな円テクスチャを共有して描画する。
+        const canvas = document.createElement("canvas");
+        canvas.width = SIZE_PARTICLE * 2 * dpi;
+        canvas.height = SIZE_PARTICLE * 2 * dpi;
+
+        const ctx = canvas.getContext("2d");
+        ctx.beginPath();
+        ctx.arc(
+          SIZE_PARTICLE * dpi,
+          SIZE_PARTICLE * dpi,
+          (SIZE_PARTICLE * dpi) / 2,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fillStyle = "white";
+        ctx.fill();
+
+        const particleTexture = Texture.from(canvas);
+        // 座標だけ毎フレーム更新したいので、ParticleContainer を使って描画負荷を抑える。
+        const fluidContainer = new ParticleContainer({
+          dynamicProperties: {
+            position: true,
+          },
+        });
+        stage.addChildAt(fluidContainer, 0);
+
+        const pixiParticles = [];
+        for (let i = 0; i < currentParticleCount; i++) {
+          const shape = new Particle({
+            texture: particleTexture,
+            x: 0,
+            y: 0,
+            scaleX: 1 / dpi,
+            scaleY: 1 / dpi,
+            anchorX: 0.5,
+            anchorY: 0.5,
+          });
+          fluidContainer.addParticle(shape);
+          pixiParticles.push(shape);
+        }
+
+        const pixiDragBall = new Graphics();
+        pixiDragBall.circle(0, 0, SIZE_DRAGGABLE);
+        pixiDragBall.fill({ color: 0x990000 });
+        pixiDragBall.eventMode = "static";
+        pixiDragBall.cursor = "pointer";
+        stage.addChild(pixiDragBall);
+
+        return { pixiDragBall, pixiParticles };
+      }
+
+      function createMouseJoint(targetPoint) {
+        if (mouseJoint) return;
+
+        // 直接座標を書き換えると慣性が消えるので、MouseJoint で物理のまま引っ張る。
+        const jointDef = new Box2D.b2MouseJointDef();
+        jointDef.bodyA = groundBody;
+        jointDef.bodyB = ballBody;
+        jointDef.target = new Box2D.b2Vec2(targetPoint.x, targetPoint.y);
+        jointDef.maxForce = 1000 * ballBody.GetMass();
+
+        const stiffnessPtr = Box2D._malloc(Float32Array.BYTES_PER_ELEMENT * 2);
+        Box2D.b2LinearStiffness(
+          stiffnessPtr,
+          stiffnessPtr + Float32Array.BYTES_PER_ELEMENT,
+          5,
+          0.7,
+          groundBody,
+          ballBody,
+        );
+        const stiffnessOffset = stiffnessPtr >> 2;
+        jointDef.stiffness = Box2D.HEAPF32[stiffnessOffset];
+        jointDef.damping = Box2D.HEAPF32[stiffnessOffset + 1];
+        Box2D._free(stiffnessPtr);
+
+        mouseJoint = Box2D.castObject(
+          world.CreateJoint(jointDef),
+          Box2D.b2MouseJoint,
+        );
+        ballBody.SetAwake(true);
+      }
+
+      function destroyMouseJoint() {
+        if (!mouseJoint) return;
+
+        world.DestroyJoint(mouseJoint);
+        mouseJoint = null;
+      }
+
+      function setupDragEvent() {
+        let dragController = null;
+
+        function beginDragListeners() {
+          dragController?.abort();
+          dragController = new AbortController();
+          const options = { capture: true, signal: dragController.signal };
+
+          addEventListener("pointermove", onPointerMove, options);
+          addEventListener("pointerup", onPointerEnd, options);
+          addEventListener("pointercancel", onPointerEnd, options);
+        }
+
+        function endDragListeners() {
+          dragController?.abort();
+          dragController = null;
+        }
+
+        function onPointerMove(event) {
+          if (!isDragging || !mouseJoint || !dragTarget) return;
+          if (
+            activePointerId != null &&
+            event.pointerId !== undefined &&
+            event.pointerId !== activePointerId
+          ) {
+            return;
+          }
+
+          const p = getPointerWorld(event);
+          dragTarget.Set(p.x, p.y);
+          // 目標点だけを更新し、球の追従と慣性は Box2D 側へ任せる。
+          mouseJoint.SetTarget(dragTarget);
+        }
+
+        function onPointerEnd(event) {
+          if (!isDragging) return;
+          if (
+            activePointerId != null &&
+            event.pointerId !== undefined &&
+            event.pointerId !== activePointerId
+          ) {
+            return;
+          }
+
+          isDragging = false;
+          activePointerId = null;
+          destroyMouseJoint();
+          endDragListeners();
+        }
+
+        pixiDragBall.on("pointerdown", (event) => {
+          if (mouseJoint) return;
+
+          try {
+            event.preventDefault();
+          } catch {}
+
+          if (event.pointerId !== undefined) {
+            activePointerId = event.pointerId;
+            try {
+              app.canvas.setPointerCapture(event.pointerId);
+            } catch {}
+          }
+
+          isDragging = true;
+          const p = getPointerWorld(event);
+          // ベクトルの再生成を避けるため、dragTarget は使い回す。
+          dragTarget ??= new Box2D.b2Vec2(p.x, p.y);
+          dragTarget.Set(p.x, p.y);
+          createMouseJoint(p);
+
+          beginDragListeners();
+        });
+      }
+
+      function renderParticles() {
+        // LiquidFun の位置バッファをそのまま読み出して、Pixi 側へ転写する。
+        const positionBuffer = particleSystem.GetPositionBuffer();
+        const offset = Box2D.getPointer(positionBuffer) >> 2;
+
+        for (let i = 0; i < currentParticleCount; i++) {
+          const particle = pixiParticles[i];
+          particle.x = Box2D.HEAPF32[offset + i * 2] * METER;
+          particle.y = Box2D.HEAPF32[offset + i * 2 + 1] * METER;
+        }
+      }
+
+      function stepPhysics() {
+        world.Step(
+          TIME_STEP,
+          VELOCITY_ITERATIONS,
+          POSITION_ITERATIONS,
+          particleIterations,
+        );
+      }
+
+      function clampBallToViewport() {
+        // リサイズで画面が急に小さくなったときだけ、赤い球を可視範囲へ戻す。
+        const radius = SIZE_DRAGGABLE / METER;
+        const worldWidth = getWorldWidth() / METER;
+        const worldHeight = getWorldHeight() / METER;
+        const position = ballBody.GetPosition();
+        const clampedX = Math.min(
+          Math.max(position.x, radius),
+          worldWidth - radius,
+        );
+        const clampedY = Math.min(position.y, worldHeight - radius);
+
+        if (clampedX === position.x && clampedY === position.y) {
+          return;
+        }
+
+        ballBody.SetTransform(
+          new Box2D.b2Vec2(clampedX, clampedY),
+          ballBody.GetAngle(),
+        );
+      }
+
+      function syncViewportToPhysics() {
+        // resize event の最中に LiquidFun を触ると壊れやすいので、反映はメインループ内へ寄せる。
+        const worldWidth = getWorldWidth();
+        const worldHeight = getWorldHeight();
+
+        if (
+          worldWidth === appliedWorldWidth &&
+          worldHeight === appliedWorldHeight
+        ) {
+          return;
+        }
+
+        appliedWorldWidth = worldWidth;
+        appliedWorldHeight = worldHeight;
+        createPhysicsWalls();
+        clampBallToViewport();
+      }
+
+      function handleTick(frameTime) {
+        if (lastFrameTime == null) {
+          lastFrameTime = frameTime;
+        }
+
+        frameStats.begin();
+
+        // 固定 60 Hz で進めて、144 Hz などの高リフレッシュ環境でも倍速にならないようにする。
+        const rawElapsed = Math.max((frameTime - lastFrameTime) / 1000, 0);
+        const elapsed = Math.min(rawElapsed, MAX_FRAME_DELTA);
+        const frameDurationMs = Math.max(frameTime - lastFrameTime, 0);
+        lastFrameTime = frameTime;
+        accumulatedTime += elapsed;
+        syncViewportToPhysics();
+
+        let steps = 0;
+        const physicsStart = performance.now();
+        while (accumulatedTime >= TIME_STEP && steps < MAX_PHYSICS_STEPS) {
+          stepPhysics();
+          accumulatedTime -= TIME_STEP;
+          steps++;
+        }
+        const physicsMs = performance.now() - physicsStart;
+
+        if (steps === MAX_PHYSICS_STEPS && accumulatedTime >= TIME_STEP) {
+          accumulatedTime = 0;
+        }
+
+        const renderStart = performance.now();
+        renderParticles();
+
+        const ballPosition = ballBody.GetPosition();
+        pixiDragBall.x = ballPosition.x * METER;
+        pixiDragBall.y = ballPosition.y * METER;
+        app.renderer.render(stage);
+        const renderMs = performance.now() - renderStart;
+        frameStats.end();
+
+        recordMetric(performanceStats.physics, physicsMs);
+        recordMetric(performanceStats.render, renderMs);
+        performanceStats.physicsSteps = steps;
+        performanceStats.fps =
+          frameDurationMs > 0 ? 1000 / frameDurationMs : TARGET_FPS;
+        performanceStats.frameCount += 1;
+
+        if (performanceStats.frameCount % STATS_UPDATE_INTERVAL === 0) {
+          updateStatsPanel();
+        }
+
+        requestAnimationFrame(handleTick);
+      }
+    </script>
+  </head>
+  <body>
+    <div class="stats-panel">
+      <code id="stats-text">Loading stats…</code>
+    </div>
+  </body>
 </html>

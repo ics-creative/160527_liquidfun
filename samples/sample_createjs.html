@@ -1,63 +1,208 @@
-<!DOCTYPE html>
-<html lang="ja" dir="ltr">
-<meta charset="utf-8"/>
-<title>Liquid Demo by @clockmaker</title>
-<meta http-equiv="X-UA-Compatible" content="IE=edge"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover"/>
-<meta name="google" content="notranslate"/>
-<meta name="referrer" content="unsafe-url"/>
-<meta name="description" content="Googleの物理演算ライブラリ「Liquid」を使ったCreateJSのデモ" />
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LiquidFun CreateJS Trail Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-<meta property="og:locale" content="ja_JP"/>
-<meta property="og:type" content="website"/>
-<meta property="og:title" content="Liquid Demo by @clockmaker"/>
-<meta property="og:description" content="Googleの物理演算ライブラリ「Liquid」を使ったCreateJSのデモ"/>
-<meta property="og:url" content="https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs.html"/>
-<meta property="og:site_name" content="ICS MEDIA"/>
-<meta property="og:image" content="https://ics-creative.github.io/160527_liquidfun/images/sample_createjs.png"/>
-<meta name="twitter:card" content="player"/>
-<meta name="twitter:player" content="https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs.html"/>
-<meta name="twitter:player:width" content="960"/>
-<meta name="twitter:player:height" content="540"/>
-<meta name="twitter:description" content="Googleの物理演算ライブラリ「Liquid」を使ったCreateJSのデモ"/>
-<meta name="twitter:title" content="Liquid Demo by @clockmaker"/>
-<meta name="twitter:site" content="@clockmaker"/>
-<meta name="twitter:image" content="https://ics-creative.github.io/160527_liquidfun/images/sample_createjs.png"/>
+    <style>
+      body {
+        margin: 0;
+        background: black;
+      }
 
-<style>
-  body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background: black;
-  }
+      canvas {
+        display: block;
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas></canvas>
 
-  #myCanvas {
-    width: 100%;
-    height: 100%;
-  }
-</style>
-<script defer src="libs/liquidfun.js"></script>
-<script defer src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
-<script defer src="js/sample_createjs.js"></script>
-<body>
-  <canvas id="myCanvas"></canvas>
+    <script src="libs/liquidfun.js"></script>
+    <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+    <script type="module">
+      // LiquidFunの1mを100pxとして描画する。
+      const METER = 100;
+      const SIZE_PARTICLE = 4;
+      const SIZE_DRAGGABLE = 25;
+      const width = innerWidth;
+      const height = innerHeight;
 
+      const world = new b2World(new b2Vec2(0, 10));
+      // 旧LiquidFunラッパーが内部から参照するためグローバルにも公開する。
+      globalThis.world = world;
+      const groundBody = createWalls();
 
-  <!-- Global site tag (gtag.js) - Google Analytics -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=UA-34243464-4"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
+      const particleSystem = createParticles();
+      // 粒子数は変わらないため、座標バッファを再利用する。
+      const particlePositions = particleSystem.GetPositionBuffer();
+      const ballBody = createBall();
+      const { canvas, stage, dragBall, particles } = createCreatejsObjects();
+      const context = canvas.getContext("2d");
+      // Canvasを消去せず、半透明の黒を重ねて残像にする。
+      context.fillStyle = "rgb(0 0 0 / 10%)";
+      stage.autoClear = false;
 
-    function gtag() {
-      dataLayer.push(arguments);
-    }
+      const dragTarget = new b2Vec2();
+      let mouseJoint = null;
+      setupDrag();
+      // ブラウザーの描画タイミングで更新する。
+      createjs.Ticker.timingMode = createjs.Ticker.RAF;
+      createjs.Ticker.on("tick", update);
 
-    if (location.href.indexOf('ics-creative.github.io') > -1) {
-      gtag('js', new Date());
-      gtag('config', 'UA-34243464-4');
-    }
-  </script>
+      // 画面外へ流体が漏れないよう、下・左・右に壁を置く。
+      function createWalls() {
+        const body = world.CreateBody(new b2BodyDef());
 
-</body>
+        const addWall = (halfWidth, halfHeight, x, y) => {
+          const shape = new b2PolygonShape();
+          shape.SetAsBoxXYCenterAngle(
+            halfWidth,
+            halfHeight,
+            new b2Vec2(x, y),
+            0,
+          );
+          body.CreateFixtureFromShape(shape, 0);
+        };
+
+        addWall(
+          width / METER / 2,
+          5 / METER,
+          width / METER / 2,
+          height / METER + 0.05,
+        );
+        addWall(5 / METER, height / METER / 2, -0.05, height / METER / 2);
+        addWall(
+          5 / METER,
+          height / METER / 2,
+          width / METER + 0.05,
+          height / METER / 2,
+        );
+        return body;
+      }
+
+      // 画面上部に粒子群を作り、重力で落とす。
+      function createParticles() {
+        const definition = new b2ParticleSystemDef();
+        definition.radius = SIZE_PARTICLE / METER;
+        definition.pressureStrength = 4;
+
+        const system = world.CreateParticleSystem(definition);
+        const shape = new b2PolygonShape();
+        shape.SetAsBoxXYCenterAngle(
+          128 / METER,
+          128 / METER,
+          new b2Vec2(width / METER / 2, -height / METER / 2),
+          0,
+        );
+
+        const group = new b2ParticleGroupDef();
+        group.shape = shape;
+        system.CreateParticleGroup(group);
+        return system;
+      }
+
+      // 粒子と衝突し、ドラッグできる動的Bodyを作る。
+      function createBall() {
+        const definition = new b2BodyDef();
+        definition.type = b2_dynamicBody;
+        definition.position.Set(width / METER / 2, (-height * 2) / METER);
+
+        const shape = new b2CircleShape();
+        shape.radius = SIZE_DRAGGABLE / METER;
+
+        const body = world.CreateBody(definition);
+        body.CreateFixtureFromShape(shape, 8);
+        return body;
+      }
+
+      // LiquidFunのBodyに対応するCreateJSオブジェクトを作る。
+      function createCreatejsObjects() {
+        const canvas = document.querySelector("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const stage = new createjs.Stage(canvas);
+        createjs.Touch.enable(stage);
+
+        const count = particlePositions.length / 2;
+        const particles = [];
+        for (let i = 0; i < count; i++) {
+          const particle = new createjs.Shape();
+          particle.mouseEnabled = false;
+          particle.compositeOperation =
+            Math.random() < 0.5 ? "source-over" : "lighter";
+
+          const hue = (i / count) * 100 + 180;
+          const saturation = Math.random() * 40 + 60;
+          particle.graphics
+            .beginFill(createjs.Graphics.getHSL(hue, saturation, 70, 0.5))
+            .drawCircle(0, 0, 12 * Math.random() * Math.random());
+          stage.addChild(particle);
+          particles.push(particle);
+        }
+
+        const dragBall = new createjs.Shape();
+        dragBall.graphics
+          .beginFill("black")
+          .setStrokeStyle(3)
+          .beginStroke("white")
+          .drawCircle(0, 0, SIZE_DRAGGABLE);
+        stage.addChild(dragBall);
+
+        return { canvas, stage, dragBall, particles };
+      }
+
+      function getDragTarget() {
+        dragTarget.Set(stage.mouseX / METER, stage.mouseY / METER);
+        return dragTarget;
+      }
+
+      // MouseJointでボールをポインターへ引き寄せる。
+      function setupDrag() {
+        dragBall.on("mousedown", () => {
+          if (mouseJoint) return;
+
+          const definition = new b2MouseJointDef();
+          definition.bodyA = groundBody;
+          definition.bodyB = ballBody;
+          definition.target = getDragTarget();
+          definition.maxForce = 1000 * ballBody.GetMass();
+
+          mouseJoint = world.CreateJoint(definition);
+          ballBody.SetAwake(true);
+        });
+
+        dragBall.on("pressmove", () => {
+          mouseJoint?.SetTarget(getDragTarget());
+        });
+
+        dragBall.on("pressup", () => {
+          if (!mouseJoint) return;
+          world.DestroyJoint(mouseJoint);
+          mouseJoint = null;
+        });
+      }
+
+      function update(event) {
+        // 前回からの経過時間で物理演算を進める。
+        world.Step(event.delta / 1000, 1, 1);
+
+        // LiquidFunの座標をCreateJSへ同期する。
+        for (let i = 0; i < particles.length; i++) {
+          particles[i].x = particlePositions[i * 2] * METER;
+          particles[i].y = particlePositions[i * 2 + 1] * METER;
+        }
+
+        const ballPosition = ballBody.GetPosition();
+        dragBall.x = ballPosition.x * METER;
+        dragBall.y = ballPosition.y * METER;
+
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        stage.update();
+      }
+    </script>
+  </body>
 </html>

@@ -1,6 +1,6 @@
 # LiquidFun.js Examples
 
-See below article. 
+See below article.
 
 https://ics.media/entry/12206/
 
@@ -10,7 +10,10 @@ JavaScript library is available from the below url.
 
 https://github.com/google/liquidfun/tree/master/liquidfun/Box2D/lfjs/testbed
 
-## Original Example
+## Examples
 
-- [CreateJS Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs.html)
-- [Pixi.js Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_pixijs.html)
+- [CreateJS Simple Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs_simple.html)
+- [CreateJS Trail Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_createjs.html)
+- [PixiJS Performance Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_pixijs.html)
+- [PixiJS Simple Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_pixijs_simple.html)
+- [PixiJS Trail Example](https://ics-creative.github.io/160527_liquidfun/samples/sample_pixijs_trail.html)

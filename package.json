@@ -2,7 +2,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "format": "prettier --write 'samples/js/*.js'"
+    "format": "prettier --write 'samples/*.html' 'README.md' 'package.json'"
   },
   "dependencies": {
     "@types/createjs": "^0.0.32",
