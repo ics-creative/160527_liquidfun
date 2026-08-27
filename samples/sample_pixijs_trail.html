@@ -24,7 +24,15 @@
       }
     </script>
     <script type="module">
-      import { Application, Graphics, GraphicsContext } from "pixi.js";
+      import {
+        Application,
+        Circle,
+        Container,
+        Graphics,
+        GraphicsContext,
+        RenderTexture,
+        Sprite,
+      } from "pixi.js";
       import Box2DFactory from "liquidfun-wasm";
 
       // LiquidFunの1mを100pxとして描画する。
@@ -36,19 +44,30 @@
 
       const Box2D = await Box2DFactory();
       const app = new Application();
-      // Canvasを消去せず、前フレームを残して残像にする。
       await app.init({
         resizeTo: window,
-        preserveDrawingBuffer: true,
-        clearBeforeRender: false,
+        preference: "webgpu",
+        background: 0x000000,
       });
       document.body.append(app.canvas);
+
+      // WebGPUのCanvasは前フレームを保持しないため、残像はRenderTextureに蓄積する。
+      const trailScene = new Container();
+      const trailTexture = RenderTexture.create({
+        width,
+        height,
+        resolution: app.renderer.resolution,
+        dynamic: true,
+      });
+      const trailOutput = new Sprite(trailTexture);
+      app.stage.addChild(trailOutput);
+      let clearTrail = true;
 
       // 半透明の黒を重ね、前フレームを徐々に消して残像にする。
       const fade = new Graphics()
         .rect(0, 0, width, height)
         .fill({ color: 0x000000, alpha: 0.2 });
-      app.stage.addChild(fade);
+      trailScene.addChild(fade);
 
       const world = new Box2D.b2World(new Box2D.b2Vec2(0, 10));
       // MouseJointの土台は固定し、リサイズ時は壁Bodyだけ作り直す。
@@ -64,6 +83,12 @@
         1 / 60,
       );
       const { dragBall, particles } = createPixiObjects();
+      // 描画本体はRenderTexture側にあるため、操作判定だけをstageに置く。
+      const dragHandle = new Container();
+      dragHandle.eventMode = "static";
+      dragHandle.cursor = "pointer";
+      dragHandle.hitArea = new Circle(0, 0, SIZE_DRAGGABLE);
+      app.stage.addChild(dragHandle);
 
       const dragTarget = new Box2D.b2Vec2();
       let mouseJoint = null;
@@ -147,7 +172,7 @@
           particle.tint = `hsl(${(i / count) * 100 + 180} ${Math.random() * 40 + 60}% 70%)`;
           particle.alpha = 0.5;
           particle.blendMode = Math.random() < 0.5 ? "normal" : "add";
-          app.stage.addChild(particle);
+          trailScene.addChild(particle);
           particles.push(particle);
         }
 
@@ -155,9 +180,7 @@
           .circle(0, 0, SIZE_DRAGGABLE)
           .fill(0x000000)
           .stroke({ color: 0xffffff, width: 3 });
-        dragBall.eventMode = "static";
-        dragBall.cursor = "pointer";
-        app.stage.addChild(dragBall);
+        trailScene.addChild(dragBall);
 
         return { dragBall, particles };
       }
@@ -169,7 +192,7 @@
 
       // MouseJointでボールをポインターへ引き寄せる。
       function setupDrag() {
-        dragBall.on("pointerdown", (event) => {
+        dragHandle.on("pointerdown", (event) => {
           if (mouseJoint) return;
           setDragTarget(event);
 
@@ -211,6 +234,8 @@
         height = app.screen.height;
         fade.width = width;
         fade.height = height;
+        trailTexture.resize(width, height, app.renderer.resolution);
+        clearTrail = true;
         world.DestroyBody(wallBody);
         wallBody = createWalls();
       }
@@ -232,6 +257,16 @@
 
         const ballPosition = ballBody.GetPosition();
         dragBall.position.set(ballPosition.x * METER, ballPosition.y * METER);
+        dragHandle.position.copyFrom(dragBall.position);
+
+        // 明示的なRenderTextureなら、WebGPUでも前フレームをloadして保持できる。
+        app.renderer.render({
+          container: trailScene,
+          target: trailTexture,
+          clear: clearTrail,
+          clearColor: [0, 0, 0, 1],
+        });
+        clearTrail = false;
       }
     </script>
   </head>
